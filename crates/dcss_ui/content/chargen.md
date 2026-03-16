@@ -14,9 +14,11 @@ widgets:
 
 # Create Your Character {title}
 
-| Species | Background |
-|---------|-----------|
-| [select](chosen_species){species_list} | [select](chosen_job){job_list} |
+## Species
+[select](chosen_species){species_list}
+
+## Background
+[select](chosen_job){job_list}
 
 ---
 

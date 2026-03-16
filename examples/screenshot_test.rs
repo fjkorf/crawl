@@ -75,10 +75,12 @@ fn main() {
         });
     }
 
-    // Skip character creation for automated tests — go straight to Playing phase
+    // Skip character creation — pre-set the litui start_game button click count
+    // so check_chargen_complete transitions to Playing on the first frame.
     {
-        use dcss_core::turn::GamePhase;
-        app.insert_resource(bevy::prelude::NextState::pending(GamePhase::Playing));
+        let mut state = dcss_ui::LituiState::default();
+        state.start_game_count = 1;
+        app.insert_resource(state);
     }
 
     app.init_resource::<FrameCount>()

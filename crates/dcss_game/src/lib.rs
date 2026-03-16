@@ -2,7 +2,7 @@
 //! Now includes monster AI (chase + attack) and random monster placement.
 
 use bevy::prelude::*;
-use bevy_egui::EguiPrimaryContextPass;
+use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 use rand::Rng;
 
 use dcss_core::chargen::{self, ChargenState, SpeciesDefs, JobDefs};
@@ -160,14 +160,14 @@ fn toggle_inventory(keyboard: Res<ButtonInput<KeyCode>>, mut next_state: ResMut<
 }
 
 fn populate_inventory_state(inventory: Res<Inventory>, mut state: ResMut<LituiState>) {
-    state.inv_gold = format!("{}", inventory.gold);
-    state.inv_items.clear();
+    state.gold_amount = format!("{}", inventory.gold);
+    state.items.clear();
     for (i, item) in inventory.items.iter().enumerate() {
-        let mut row = dcss_ui::pages::InvItemsRow::default();
+        let mut row = dcss_ui::pages::ItemsRow::default();
         row.letter = format!("{}", (b'a' + i as u8) as char);
         row.name = item.name.clone();
         row.qty = if item.quantity > 1 { format!("x{}", item.quantity) } else { String::new() };
-        state.inv_items.push(row);
+        state.items.push(row);
     }
 }
 

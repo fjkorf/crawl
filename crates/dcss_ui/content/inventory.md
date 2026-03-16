@@ -6,11 +6,13 @@ page:
 
 # Inventory
 
-**Gold:** [display](inv_gold) {gold}
+**Gold:** [display](gold_amount) {gold}
 
-[foreach](inv_items)
+[foreach](items)
+
 | {letter} | {name} | {qty} |
 |----------|--------|-------|
+
 [/foreach]()
 
 *Press i or Escape to close.*
