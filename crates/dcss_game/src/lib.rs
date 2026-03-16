@@ -10,6 +10,7 @@ use dcss_core::chargen::{self, ChargenState, SpeciesDefs, JobDefs};
 use dcss_core::combat;
 use dcss_core::fov::VisibilityMap;
 use dcss_core::pathfind;
+use dcss_core::save;
 use dcss_core::item::{self, Inventory, ItemTag, ItemName, ItemData, ItemPosition};
 use dcss_core::level::{CurrentLevel, LevelStore, SavedLevel, SavedMonster, SavedItem, StairsAction, StairsDirection, MAX_DEPTH};
 use dcss_core::message::MessageLog;
@@ -77,7 +78,7 @@ impl Plugin for DcssGamePlugin {
                 (update_fov, sync_player_sprite, sync_monster_sprites, apply_visibility, camera_follow)
                     .chain().run_if(in_state(GamePhase::Playing)).after(execute_player_action))
             .add_systems(Update,
-                (enter_examine_mode, toggle_inventory, handle_item_use, examine::hide_examine_cursor)
+                (enter_examine_mode, toggle_inventory, handle_item_use, handle_save, examine::hide_examine_cursor)
                     .run_if(in_state(GameMode::Play)).run_if(in_state(GamePhase::Playing)))
             .add_systems(Update,
                 (examine::examine_input_system, examine::examine_cursor_sync)
@@ -326,6 +327,25 @@ fn handle_item_use(
             }
         } else {
             messages.add("You have no armour.");
+        }
+    }
+}
+
+fn handle_save(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    player: Res<Player>,
+    level: Res<CurrentLevel>,
+    store: Res<LevelStore>,
+    inventory: Res<Inventory>,
+    vis: Res<VisibilityMap>,
+    terrain: Res<TerrainGrid>,
+    mut messages: ResMut<MessageLog>,
+) {
+    if keyboard.just_pressed(KeyCode::KeyS) && keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+        let save_data = save::create_save(&player, &level, &store, &inventory, &messages, &vis, &terrain);
+        match save::save_to_file(&save_data) {
+            Ok(()) => messages.add("Game saved."),
+            Err(e) => messages.add(format!("Save failed: {}", e)),
         }
     }
 }

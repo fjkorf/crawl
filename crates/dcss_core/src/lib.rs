@@ -11,6 +11,7 @@ pub mod item;
 pub mod enums;
 pub mod fov;
 pub mod pathfind;
+pub mod save;
 
 #[cfg(test)]
 mod tests;
