@@ -1,8 +1,10 @@
-# litui: Comprehensive Feature Request for Full Game UI Coverage
+# [PARTIALLY IMPLEMENTED] litui: Comprehensive Feature Request for Full Game UI Coverage
 
-## Context
+> **Status**: Priorities 1-4 IMPLEMENTED by litui. All 5 game screens now use litui (stat panel with [progress] + ::: style + ::: if, message log with [log]). Priorities 5-6 (containers, input widgets in foreach) remain as proposals. This document is partially historical.
 
-We've migrated 3 of 6 UI screens to litui (chargen, inventory, monster info). The remaining 3 screens — stat panel, message log, and wrapper/container code — stay as egui because litui lacks specific capabilities. This proposal covers everything needed to reach 100% litui coverage for game UI content, reducing egui to only structural containers (panels, windows).
+## Context (Historical)
+
+We migrated 3 of 6 UI screens to litui (chargen, inventory, monster info). The remaining 3 screens — stat panel, message log, and wrapper/container code — needed new litui features. litui implemented priorities 1-4, enabling 100% litui for game content.
 
 We also look ahead to screens the vertical slice needs (win/death, item selection) and future DCSS screens (god, spell, skill).
 

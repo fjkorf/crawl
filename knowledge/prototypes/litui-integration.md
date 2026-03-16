@@ -1,12 +1,18 @@
 # litui Integration — Final Status
 
-## All Three UI Screens Now Use litui
+## 100% litui for All Game UI Content (5 Pages)
 
-| Screen | litui Feature | Status |
-|--------|--------------|--------|
-| Monster Info | `[display]` (Option C self-declaration) | Working since MVP |
-| Character Creation | `[select]` (two lists: species + jobs) | Working |
-| Inventory | `[foreach]` (dynamic item list) | Working |
+| Screen | litui Features | Markdown |
+|--------|---------------|----------|
+| Character Creation | `[select]` × 2, `[display]`, `[button]` | chargen.md |
+| Inventory | `::: foreach`, `[display]` | inventory.md |
+| Monster Info | `[display]` × 7 | monster_info.md |
+| Stat Panel | `[progress]`, `::: style`, `::: if`, `[display]` | stat_panel.md |
+| Message Log | `[log]` | message_log.md |
+
+**Zero egui widget code** — egui only provides structural containers (SidePanel, Window, etc.). All game content authored in ~116 lines of markdown.
+
+Uses `::key` syntax (not old `{key}`) for style application. Widget config `{config}` unchanged.
 
 ## Integration Pattern
 

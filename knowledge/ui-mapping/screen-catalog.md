@@ -54,8 +54,8 @@ Core widgets: Bin, Box (flexbox), Grid, Stack, Switcher, Scroller, Text, Image, 
 | Dungeon View | Real-time tile rendering | Bevy 2D renderer (NOT egui) |
 | Minimap | Pixel-level rendering | Bevy 2D or egui Canvas |
 | Direction Chooser | Animated overlay on dungeon | Bevy overlay system |
-| Stat Panel | Real-time updating | egui side panel |
-| Message Log | Scrolling, styled text | egui ScrollArea |
+| Stat Panel | Real-time updating | **litui [progress] + ::: style + ::: if** (migrated) |
+| Message Log | Scrolling, styled text | **litui [log]** (migrated) |
 | Inventory Grid | Icons + hotkeys + quantity | **litui [foreach]** (migrated from egui) |
 | Spell Grid | Icons + failure rates | egui Grid with icons |
 | Ability Grid | Icons + costs + failure | egui Grid with icons |

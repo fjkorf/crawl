@@ -20,16 +20,18 @@
 | Camera follow + projection | Done | — |
 | Melee combat resolution | Done | Ranged combat, multi-attack, brands |
 | Monster AI (chase + attack) | Done | Pathfinding (A*), spell casting, fleeing, abilities |
-| Monster death + despawn | Done | XP award, corpse/item drop |
-| Door interaction | Done | Locked doors, sealed doors |
-| Stairs / level transition | Done | Level persistence, up-stairs, branch selection |
-| Floor item spawning + auto-pickup | Done | Manual pickup (g key), drop, throwing |
-| Item use system | Not started | Quaff, read, wield, wear, evoke |
-| Equipment slots | Not started | Weapon, armour, ring, amulet slots on Player |
-| FOV / line of sight | Not started | Symmetric shadowcasting, LOS mask on rendering |
-| Experience + leveling | Not started | XP pool, level-up stat choice, HP/MP scaling |
+| Monster death + despawn | Done | XP award on kill |
+| Door interaction | Done | Open closed doors |
+| Stairs / level transition | Done | Up/down, 5-level dungeon, LevelStore persistence |
+| Floor item spawning + auto-pickup | Done | Random items per level, auto-pickup on walk |
+| Item use system | Done | Quaff potions (heal), wield weapons, wear armour |
+| Equipment slots | Done | weapon + armour on Player, affects damage/AC |
+| FOV / line of sight | Done | Recursive shadowcasting in fov.rs, 8-tile radius |
+| Experience + leveling | Done | HD*10 XP per kill, threshold-based level-up, HP/MP increase |
+| Win condition (Orb) | Done | Orb on D:5, has_orb flag, ascend to surface = win |
+| Level persistence | Done | LevelStore saves/restores grid + monsters + items |
 | Status effects / durations | Not started | Duration array on Player, tick-down per turn |
-| Save / load | Not started | Serialize Player + TerrainGrid + monsters + items |
+| Save / load (to disk) | Not started | Serialize full game state to file |
 | God system framework | Not started | Piety resource, prayer, conduct tracking |
 | Spell system framework | Not started | Spell list, MP cost, targeting, effects |
 | Death / morgue | Not started | Character dump, score recording |
@@ -86,22 +88,20 @@ Engine (ECS systems, Bevy rendering, game logic)
 UI (litui markdown, egui panels, Bevy 2D sprites)
 ```
 
-## Priority by Layer
+## Priority by Layer (Updated — Vertical Slice Complete)
 
-### Engine priorities (what makes it playable)
-1. FOV / line of sight — can't see through walls
-2. Item use (quaff/read/wield/wear) — items matter
-3. Equipment slots — weapons and armour affect combat
-4. Experience + leveling — progression
-5. Ranged combat — not just melee
-6. Status effects / durations — poison, haste, etc.
+### Engine priorities (next features)
+1. ~~FOV~~ ✅ | ~~Item use~~ ✅ | ~~Equipment~~ ✅ | ~~XP/leveling~~ ✅
+2. Ranged combat — not just melee
+3. Status effects / durations — poison, haste, etc.
+4. Save/load to disk — persistence across sessions
+5. Spell system framework — MP cost, targeting, effects
 
 ### Middleware priorities (what makes content accessible)
 1. Load all 672 monster YAML files — full bestiary
-2. Wire DungeonFeatureType to rendering — correct tile per feature
-3. Extract spell data from C++ headers — spell system needs data
-4. Level layout algorithm — connect multiple vaults into a level
-5. Expand Lua API stubs — push vault execution past 90%
+2. Extract spell data from C++ headers — spell system needs data
+3. Level layout algorithm — connect multiple vaults into a level
+4. Expand Lua API stubs — push vault execution past 90%
 
 ### Content priorities (what makes it DCSS)
 1. D:1-15 branch with appropriate monster sets per depth
