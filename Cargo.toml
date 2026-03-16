@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[package]
+name = "dcss-bevy"
+edition = "2024"
+rust-version = "1.92"
+version = "0.1.0"
+
+[dependencies]
+dcss_core = { path = "crates/dcss_core" }
+dcss_tiles = { path = "crates/dcss_tiles" }
+dcss_ui = { path = "crates/dcss_ui" }
+bevy = { version = "0.18", default-features = false, features = [
+    "bevy_winit",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_sprite",
+    "bevy_sprite_render",
+    "bevy_text",
+    "bevy_asset",
+    "bevy_state",
+    "bevy_image",
+    "png",
+    "default_font",
+    "x11",
+] }
+bevy_egui = "0.39"
+egui = "0.33"
+serde_yaml = "0.9"
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[[example]]
+name = "screenshot_test"
