@@ -5,3 +5,6 @@ pub mod monster;
 pub mod combat;
 pub mod message;
 pub mod turn;
+
+#[cfg(test)]
+mod tests;

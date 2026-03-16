@@ -9,9 +9,6 @@
 //!   cargo run --example screenshot_test
 //!   SCREENSHOT_MODE=walkthrough cargo run --example screenshot_test
 
-#[path = "../src/plugin.rs"]
-mod plugin;
-
 use std::collections::VecDeque;
 
 use bevy::app::AppExit;
@@ -21,8 +18,8 @@ use bevy_egui::EguiPlugin;
 
 use dcss_core::turn::{GameMode, PendingMove};
 use dcss_core::types::Coord;
+use dcss_game::{DcssGamePlugin, DungeonSource};
 use dcss_ui::examine::ExamineCursor;
-use plugin::DcssGamePlugin;
 
 // --- Separate, focused resources ---
 
@@ -72,7 +69,7 @@ fn main() {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
-        app.insert_resource(plugin::DungeonSource::DesVault {
+        app.insert_resource(DungeonSource::DesVault {
             des_file,
             vault_index,
         });

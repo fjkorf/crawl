@@ -13,6 +13,7 @@ dcss_core = { path = "crates/dcss_core" }
 dcss_tiles = { path = "crates/dcss_tiles" }
 dcss_ui = { path = "crates/dcss_ui" }
 dcss_lua = { path = "crates/dcss_lua" }
+dcss_game = { path = "crates/dcss_game" }
 bevy = { version = "0.18", default-features = false, features = [
     "bevy_winit",
     "bevy_render",

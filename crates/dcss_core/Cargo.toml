@@ -5,7 +5,7 @@ rust-version = "1.92"
 version = "0.1.0"
 
 [dependencies]
-bevy = { version = "0.18", default-features = false }
+bevy = { version = "0.18", default-features = false, features = ["bevy_state"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 rand = "0.9"

@@ -1,0 +1,21 @@
+[package]
+name = "dcss_game"
+edition = "2024"
+rust-version = "1.92"
+version = "0.1.0"
+
+[dependencies]
+dcss_core = { path = "../dcss_core" }
+dcss_tiles = { path = "../dcss_tiles" }
+dcss_ui = { path = "../dcss_ui" }
+dcss_lua = { path = "../dcss_lua" }
+bevy = { version = "0.18", default-features = false, features = [
+    "bevy_sprite",
+    "bevy_sprite_render",
+    "bevy_state",
+    "bevy_image",
+] }
+bevy_egui = "0.39"
+egui = "0.33"
+serde_yaml = "0.9"
+rand = "0.9"
