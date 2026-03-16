@@ -1,4 +1,6 @@
-# litui Integration Issues and Questions
+# [RESOLVED] litui Integration Issues and Questions
+
+> **Status**: ALL 7 ISSUES RESOLVED by litui. See litui-integration.md for current working state. This document is historical.
 
 ## Context
 

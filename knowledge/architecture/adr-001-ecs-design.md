@@ -1,6 +1,6 @@
 # ADR-001: ECS Architecture Design
 
-## Status: PROPOSED (pending prototype validation)
+## Status: VALIDATED (via MVP prototype — dcss_game crate)
 
 ## Context
 

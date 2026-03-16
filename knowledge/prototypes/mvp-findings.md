@@ -24,7 +24,7 @@ Bevy 0.18 provides `Screenshot::primary_window()` + `save_to_disk()` observer pa
 
 ## DcssPlugin Pattern
 
-Extracted all shared game setup into `src/plugin.rs::DcssGamePlugin`. Both `main.rs` (~20 lines) and `examples/screenshot_test.rs` (~170 lines) use it. This avoids ~200 lines of duplication and makes test examples trivial to write.
+Extracted all shared game setup into `crates/dcss_game/src/lib.rs::DcssGamePlugin` (originally `src/plugin.rs`, moved to its own crate). Both `main.rs` (~20 lines) and `examples/screenshot_test.rs` (~170 lines) use it. This avoids ~200 lines of duplication and makes test examples trivial to write.
 
 Key design: the plugin owns all game systems but does NOT own the window/rendering plugins. The binary or example adds `DefaultPlugins` + `EguiPlugin` + `DcssGamePlugin`.
 

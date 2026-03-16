@@ -1,5 +1,15 @@
 # DCSS Combat System Analysis
 
+## Implementation Status
+
+A simplified combat system is implemented in `crates/dcss_core/src/combat.rs`:
+- `resolve_melee(damage, accuracy, ac, ev) -> MeleeResult` — random roll vs AC
+- Player attacks monsters by walking into them
+- Monsters retaliate when adjacent (in `dcss_game` monster_ai system)
+- No brands, skills, ranged, spells, or multi-attack yet
+
+The analysis below describes the C++ system for reference during deeper porting.
+
 ## Architecture
 
 Combat uses a phase-based OOP design with class hierarchy:

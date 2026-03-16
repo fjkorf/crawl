@@ -1,4 +1,6 @@
-# litui Feature Proposal: Dynamic Data Rendering
+# [IMPLEMENTED] litui Feature Proposal: Dynamic Data Rendering
+
+> **Status**: IMPLEMENTED. litui added `[foreach]` and `[select]` directives. Character creation uses [select], inventory uses [foreach]. This document is historical.
 
 ## Background
 

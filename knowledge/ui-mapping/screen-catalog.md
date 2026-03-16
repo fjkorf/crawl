@@ -56,12 +56,12 @@ Core widgets: Bin, Box (flexbox), Grid, Stack, Switcher, Scroller, Text, Image, 
 | Direction Chooser | Animated overlay on dungeon | Bevy overlay system |
 | Stat Panel | Real-time updating | egui side panel |
 | Message Log | Scrolling, styled text | egui ScrollArea |
-| Inventory Grid | Icons + hotkeys + quantity | egui Grid with icons |
+| Inventory Grid | Icons + hotkeys + quantity | **litui [foreach]** (migrated from egui) |
 | Spell Grid | Icons + failure rates | egui Grid with icons |
 | Ability Grid | Icons + costs + failure | egui Grid with icons |
 | Skill Training | Real-time XP allocation | egui Grid with sliders |
 | Shop Interface | Prices, gold, buy/sell | egui Window with lists |
-| Character Creation | Multi-step, validation | egui Wizard pattern |
+| Character Creation | Multi-step, validation | **litui [select]** (migrated from egui) |
 | Doll Editor | Visual customization | egui or Bevy 2D |
 
 ### Hybrid (litui descriptions + egui interaction) — 5 screens

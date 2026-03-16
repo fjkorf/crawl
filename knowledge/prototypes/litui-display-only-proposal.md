@@ -1,4 +1,6 @@
-# litui Feature Proposal: Display-Only Field Declarations
+# [IMPLEMENTED] litui Feature Proposal: Display-Only Field Declarations
+
+> **Status**: IMPLEMENTED. litui adopted Option C — `[display]` self-declares String fields. Working in monster info popup since MVP. This document is historical.
 
 ## Problem
 
