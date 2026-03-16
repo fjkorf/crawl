@@ -1,88 +1,198 @@
-# litui: Why the Stat Panel Can't Use litui (and What Would Fix It)
+# litui: Comprehensive Feature Request for Full Game UI Coverage
 
-## The Screen
+## Context
 
-The stat panel is a right-side panel showing player vitals: HP bar, MP bar, AC, EV, stats, XL, XP, gold, and a conditional "ORB OF ZOT" indicator. It updates every frame.
+We've migrated 3 of 6 UI screens to litui (chargen, inventory, monster info). The remaining 3 screens — stat panel, message log, and wrapper/container code — stay as egui because litui lacks specific capabilities. This proposal covers everything needed to reach 100% litui coverage for game UI content, reducing egui to only structural containers (panels, windows).
 
-## What We Wrote in egui (60 lines)
+We also look ahead to screens the vertical slice needs (win/death, item selection) and future DCSS screens (god, spell, skill).
 
+## Current State
+
+| Screen | Approach | Why |
+|--------|----------|-----|
+| Character Creation | **litui** [select] + [display] + [button] | Working |
+| Inventory | **litui** [foreach] + [display] | Working |
+| Monster Info | **litui** [display] | Working |
+| Stat Panel | **egui** ProgressBar, colored_label, conditional logic | Missing features |
+| Message Log | **egui** ScrollArea with append-only list | Missing features |
+| Container wrappers | **egui** SidePanel, TopBottomPanel, Window | Not litui's job (or is it?) |
+
+## Remaining egui Code — What It Does and Why
+
+### 1. Stat Panel (stat_panel.rs — 65 lines)
+
+**egui widgets used**:
+- `ProgressBar::new(frac).fill(color)` — HP/MP bars with custom fill colors
+- `colored_label(color, text)` — HP text changes color based on percentage
+- Conditional rendering — "ORB OF ZOT" only shown when `player.has_orb`
+
+**litui blockers**:
+- `[progress]` is stateless (literal f32, not AppState field)
+- No conditional styling (color depends on runtime value)
+- No conditional visibility (section shown/hidden based on bool)
+
+### 2. Message Log (message_panel.rs — 24 lines)
+
+**egui widgets used**:
+- `ScrollArea::vertical().stick_to_bottom(true)` — always shows newest messages
+- For loop over `messages.messages` Vec<String> — dynamic length list
+
+**litui blockers**:
+- `[foreach]` could iterate the messages, BUT it generates a table/list — not a plain scrolling text area
+- No `stick_to_bottom` scroll behavior — litui has no scroll control
+- Messages are plain strings, not structured rows with fields — `[foreach]` requires `{field}` references
+
+### 3. Container Wrappers (in dcss_game/src/lib.rs and examine.rs)
+
+Every litui render call is wrapped in an egui container:
 ```rust
-let hp_frac = player.hp as f32 / player.max_hp.max(1) as f32;
-ui.horizontal(|ui| {
-    ui.label("HP:");
-    let color = if hp_frac > 0.5 { GREEN } else if hp_frac > 0.25 { YELLOW } else { RED };
-    ui.colored_label(color, format!("{}/{}", player.hp, player.max_hp));
+egui::CentralPanel::default().show(ctx, |ui| { render_chargen(ui, &mut state); });
+egui::Window::new("Inventory").show(ctx, |ui| { render_inventory(ui, &mut state); });
+egui::Window::new("Monster Info").show(ctx, |ui| { render_monster_info(ui, &mut state); });
+egui::SidePanel::right("stats").show(ctx, |ui| { ... });
+egui::TopBottomPanel::bottom("messages").show(ctx, |ui| { ... });
+```
+
+**litui blocker**: litui renders content INTO a `&mut egui::Ui` but doesn't create the container. The panel/window creation must be done in Rust. This is arguably correct separation (layout is code, content is markdown) but adds boilerplate.
+
+### 4. Future Screens for Vertical Slice
+
+**Win/Death Screen** — static text with `[display]` fields (species, job, XL, turns, cause of death). litui can handle this today with existing features.
+
+**Item Use Selection** — "Which potion to quaff?" shows a filterable inventory subset. Needs `[select]` from a dynamic list — litui can do this.
+
+**Equipment Screen** — "Wearing: +2 leather armour. Wielding: +1 short sword." — `[display]` fields. litui can do this today.
+
+### 5. Future DCSS Screens
+
+**God Screen** — piety bar (progress!), ability list, conduct rules. Needs stateful `[progress]` and possibly `[foreach]` for ability list.
+
+**Spell Screen** — spell list with failure rates, MP costs. `[foreach]` table. litui can do this today.
+
+**Skill Screen** — skill levels with training sliders. Needs `[slider]` per skill inside `[foreach]` rows — `[foreach]` currently only supports read-only fields, not input widgets.
+
+---
+
+## Proposed Feature Set (Prioritized)
+
+### Priority 1: Stateful `[progress]` — Unblocks Stat Panel
+
+**Syntax**: `[progress](field_name)` where `field_name` is an `f64` on AppState (0.0 to 1.0).
+
+**Optional config** for fill color:
+```yaml
+widgets:
+  hp_bar:
+    fill: "#8B0000"
+  mp_bar:
+    fill: "#1E1E64"
+```
+```markdown
+[progress](hp_frac){hp_bar}
+[progress](mp_frac){mp_bar}
+```
+
+**Generated code**: `ui.add(egui::ProgressBar::new(state.hp_frac as f32).fill(color))`
+
+**Impact**: Unblocks HP/MP bars in stat panel. Also needed for XP bars, god piety bars, any gauge display.
+
+### Priority 2: Conditional Styling via AppState — Unblocks Colored Text
+
+**Syntax**: `[display](field){$style_field}` where `$` prefix means "read the style name from AppState" instead of using a literal style key.
+
+```markdown
+**HP:** [display](hp_text){$hp_style}
+```
+
+Where `state.hp_style: String` is set to `"hp_good"`, `"hp_warn"`, or `"hp_danger"` by game code, and those style names are defined in `_app.md` frontmatter.
+
+**Generated code**:
+```rust
+let style = resolve_style(&state.hp_style, &styles);
+ui.label(egui::RichText::new(&state.hp_text).color(style.color).size(style.size));
+```
+
+**Impact**: Colored HP/MP text, status effects with severity colors, item rarity colors, monster threat indicators.
+
+### Priority 3: Streaming Append List — Unblocks Message Log
+
+**Syntax**: `[log](field_name)` where `field_name` is a `Vec<String>` on AppState, rendered as a scroll area that sticks to the bottom.
+
+```markdown
+[log](messages)
+```
+
+**Generated code**:
+```rust
+egui::ScrollArea::vertical().stick_to_bottom(true).show(ui, |ui| {
+    for msg in &state.messages { ui.label(msg); }
 });
-ui.add(egui::ProgressBar::new(hp_frac).fill(egui::Color32::DARK_RED));
 ```
 
-## What We'd Want to Write in litui
+**Impact**: Message log, combat log, chat systems. Different from `[foreach]` because it's a simple string list without structured row fields, and has scroll-to-bottom behavior.
+
+### Priority 4: Conditional Sections — Nice to Have
+
+**Syntax**: `[if](bool_field)` ... `[/if]()`
 
 ```markdown
-**HP:** [display](hp_text) {hp_color}
-[progress](hp_frac)
-
-**MP:** [display](mp_text) {mp_color}
-[progress](mp_frac)
-
-| | |
-|---|---|
-| **AC** | [display](ac) |
-| **EV** | [display](ev) |
-| **XL** | [display](xl) |
-| **XP** | [display](xp_text) |
-| **Gold** | [display](gold) |
-
-[display](orb_text) {orb_style}
+[if](has_orb)
+**ORB OF ZOT** {gold}
+[/if]()
 ```
 
-## Three Blockers
+**Generated code**: `if state.has_orb { ... }`
 
-### 1. `[progress]` Is Stateless — Cannot Read From AppState
+**Impact**: Conditional UI sections (orb indicator, status warnings, equipment slots that may be empty). The empty-string `[display]` workaround covers simple cases, but conditional sections with styled text or multiple elements need this.
 
-`[progress](0.75)` renders a fixed bar. There's no `[progress](hp_frac)` that reads a field. We need `[progress]` to work like `[slider]` — accept a field name and read from AppState.
+### Priority 5: Container Directives — Reduces Boilerplate
 
-**Current**: `[progress](0.75)` → hardcoded f32 literal
-**Needed**: `[progress](hp_frac)` → reads `state.hp_frac: f64`
+**Syntax** (frontmatter):
+```yaml
+page:
+  name: Stats
+  container: side_panel_right
+  width: 180
+```
 
-The implementation would be similar to `[slider]`: add a `WidgetField::Stateful { name, ty: WidgetType::F64 }` for progress fields, and generate `ui.add(egui::ProgressBar::new(state.hp_frac as f32))` instead of a literal.
+Or for windows:
+```yaml
+page:
+  name: Inventory
+  container: window
+  width: 350
+  collapsible: false
+```
 
-### 2. No Conditional Styling — Colors Can't Depend on Runtime State
+**Impact**: Eliminates the Rust wrapper functions that create `egui::SidePanel`, `egui::Window`, `egui::CentralPanel`. The litui app could manage its own containers. Not critical — the 3-line Rust wrappers work fine — but would make litui a more complete solution.
 
-HP text should be green when above 50%, yellow 25-50%, red below 25%. litui styles are compile-time constants defined in YAML frontmatter. There's no way to switch styles based on a runtime value.
+### Priority 6: Input Widgets Inside [foreach] — Future Need
 
-**Current**: `{hp_color}` would be a single static style
-**Needed**: Conditional style selection from AppState, e.g.:
+**Syntax**: `[slider]` or `[checkbox]` inside a `[foreach]` body.
+
 ```markdown
-[display](hp_text) {hp_style}
+[foreach](skills)
+| {name} | [slider]({level}) |
+[/foreach]()
 ```
-Where `hp_style` is a `String` field on AppState that the Rust code sets to `"hp_good"`, `"hp_warn"`, or `"hp_danger"` each frame, and litui resolves it to the corresponding style definition.
 
-This is a more complex feature request — it requires the style key to be a runtime value rather than a compile-time constant. One approach: a `[styled_display]` widget that takes both a value field and a style field:
-```markdown
-[styled_display](hp_text){hp_style_name}
-```
-Where both `hp_text: String` and `hp_style_name: String` are on AppState, and the generated code looks up the style by name at runtime.
+Where each row's slider modifies `state.skills[i].level`.
 
-### 3. No Conditional Visibility — "ORB OF ZOT" Shows Only When Player Has It
+**Impact**: Skill training screen, spell memorization, keybinding configuration. Currently [foreach] is read-only. This would require generating mutable references to row fields and unique widget IDs per iteration.
 
-The orb indicator should only appear when `player.has_orb` is true. litui markdown is always rendered — there's no `[if](condition)` directive to conditionally include content.
+---
 
-**Current**: No way to express "show this line only when a bool field is true"
-**Needed**: Either:
-- `[if](has_orb)` ... `[/if]()` block directive (like `[foreach]` but for conditional sections)
-- Or a `[display]` that renders nothing when the value is empty (already works — set `orb_text = ""` when no orb)
+## Summary Table
 
-The empty-string workaround actually handles this case: set `state.orb_text = ""` when no orb, `state.orb_text = "ORB OF ZOT"` when player has it. The conditional visibility is solved by convention. But conditional STYLING (the gold color) still requires blocker #2.
+| # | Feature | Unblocks | Effort |
+|---|---------|----------|--------|
+| 1 | Stateful `[progress](field)` | Stat panel HP/MP bars, god piety, XP bar | Low |
+| 2 | Conditional styling `{$field}` | Colored HP text, item rarity, threat colors | Medium |
+| 3 | `[log](field)` append list | Message log, combat log | Low-Medium |
+| 4 | `[if](bool)` conditional sections | Orb indicator, empty equipment slots | Medium |
+| 5 | Container directives in frontmatter | Boilerplate reduction | Low |
+| 6 | Input widgets in `[foreach]` | Skill training, spell memorize | High |
 
-## Summary
-
-| Blocker | Feature Needed | Difficulty Estimate |
-|---------|---------------|-------------------|
-| Stateful `[progress]` | `[progress](field)` reads f64 from AppState | Low — same pattern as `[slider]`, minus the input handling |
-| Conditional styling | Style key from AppState field, resolved at runtime | Medium — requires runtime style lookup instead of compile-time |
-| Conditional visibility | `[if](bool_field)` block | Medium — but workaround exists (empty string) |
-
-**If litui added stateful `[progress]`**, the stat panel could be ~80% litui. The stat table and XP/gold display are straightforward `[display]` fields. Only the conditional HP/MP coloring would remain as egui.
-
-**If litui also added conditional styling**, the stat panel could be 100% litui — the entire screen expressed in ~25 lines of markdown instead of 60 lines of Rust.
+**Priority 1 alone** migrates the stat panel from 65 lines of egui to ~20 lines of markdown.
+**Priorities 1-3** eliminate ALL hand-coded egui content rendering. egui would only provide structural containers.
+**Priorities 1-4** achieve 100% litui for all game content with zero egui widget code.
