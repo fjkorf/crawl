@@ -92,6 +92,36 @@ For `[button.primary](Start_Game){start_game}` with `widgets: start_game: { trac
 
 **Question:** What is the exact field name? Is it `start_game_count`? `on_start_game_count`? How do we detect the button was clicked from Rust code?
 
+## Issue 6: Proc macro panics on invalid markdown instead of producing a compile error
+
+When our chargen.md had a button label with a space (`[button.primary](Start Game){start_game}`), the proc macro panicked:
+
+```
+error: proc macro panicked
+  --> crates/dcss_ui/src/lib.rs:13:5
+   |
+13 | /     define_markdown_app! {
+   = help: message: Undefined style key 'start_game' in frontmatter
+```
+
+The space in `Start Game` caused the markdown link parser to misparse the line. Instead of recognizing `{start_game}` as the widget config suffix, it was interpreted as a style reference on trailing paragraph text. Since `start_game` isn't defined in styles, the macro panicked.
+
+**The fix was non-obvious**: we had to change `Start Game` to `Start_Game` (underscore). This took debugging time because:
+
+1. The panic message ("Undefined style key 'start_game'") didn't indicate the root cause (space in link text breaking the parse)
+2. The error pointed at the `define_markdown_app!` invocation, not at the specific markdown file or line
+3. A panic halts compilation entirely — no partial diagnostics from other files
+
+**Suggestion: Replace panics with `compile_error!` diagnostics.** Proc macros should never panic on malformed input. Instead:
+
+- Parse errors should produce `compile_error!("chargen.md:32: button label cannot contain spaces — use underscores or angle brackets: [button.primary](<Start Game>){start_game}")` with the source file and line number.
+- Style key validation should produce `compile_error!("chargen.md:32: '{start_game}' is not defined in styles. Did you mean to use it as a widget config? Widget configs must follow a widget directive on the same line.")` — the error message should suggest the likely intent.
+- Unknown widget directives should list valid directive names.
+
+This matters especially for `define_markdown_app!` where the error could be in any of several markdown files but the compiler only points at the macro invocation site.
+
+**Pattern to follow**: Rust's `serde` derive macros produce `compile_error!` with field-level context ("unknown field `naem`, expected one of `name`, `value`"). litui could do the same: "chargen.md line 32: unknown style `start_game`, defined styles are: title, subtitle, primary, gold".
+
 ## What Would Help
 
 1. **A `define_markdown_app!` example that uses `[foreach]` and `[select]`** — the existing tests only demonstrate `include_markdown_ui!`. A multi-page app example would clarify whether these features work in the app context and show the correct patterns.
