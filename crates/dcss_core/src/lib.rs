@@ -10,6 +10,7 @@ pub mod chargen;
 pub mod item;
 pub mod enums;
 pub mod fov;
+pub mod pathfind;
 
 #[cfg(test)]
 mod tests;

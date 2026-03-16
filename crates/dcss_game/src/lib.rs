@@ -1,6 +1,7 @@
 //! DcssGamePlugin — shared game setup used by the main binary and test examples.
 //! Now includes monster AI (chase + attack) and random monster placement.
 
+use bevy::app::AppExit;
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 use rand::Rng;
@@ -8,6 +9,7 @@ use rand::Rng;
 use dcss_core::chargen::{self, ChargenState, SpeciesDefs, JobDefs};
 use dcss_core::combat;
 use dcss_core::fov::VisibilityMap;
+use dcss_core::pathfind;
 use dcss_core::item::{self, Inventory, ItemTag, ItemName, ItemData, ItemPosition};
 use dcss_core::level::{CurrentLevel, LevelStore, SavedLevel, SavedMonster, SavedItem, StairsAction, StairsDirection, MAX_DEPTH};
 use dcss_core::message::MessageLog;
@@ -19,7 +21,7 @@ use dcss_core::types::*;
 use dcss_lua::des_parser;
 use dcss_lua::lua_state;
 use dcss_tiles::{self, TileId, TileRegistry, TILE_SIZE};
-use dcss_ui::{examine, LituiState, render_chargen, render_inventory, render_stat_panel, render_message_log};
+use dcss_ui::{examine, LituiState, render_chargen, render_inventory, render_stat_panel, render_message_log, render_death_screen};
 
 /// Controls where the dungeon comes from.
 #[derive(Resource, Default)]
@@ -66,7 +68,8 @@ impl Plugin for DcssGamePlugin {
                 (generate_dungeon, spawn_dungeon, spawn_player, spawn_monsters, spawn_floor_items, spawn_examine_cursor, welcome_message)
                     .chain())
             // Playing phase: gameplay
-            .add_systems(Update, player_input.run_if(in_state(GameMode::Play)).run_if(in_state(GamePhase::Playing)))
+            .add_systems(Update, autoexplore_system.run_if(in_state(GameMode::Play)).run_if(in_state(GamePhase::Playing)))
+            .add_systems(Update, player_input.run_if(in_state(GameMode::Play)).run_if(in_state(GamePhase::Playing)).after(autoexplore_system))
             .add_systems(Update,
                 (execute_player_action, handle_stairs_input, check_monster_death, monster_ai, check_player_death)
                     .chain().run_if(in_state(GameMode::Play)).run_if(in_state(GamePhase::Playing)).after(player_input))
@@ -87,7 +90,12 @@ impl Plugin for DcssGamePlugin {
                  examine::examine_popup_system)
                     .chain().run_if(in_state(GamePhase::Playing)))
             .add_systems(EguiPrimaryContextPass,
-                render_inventory_screen.run_if(in_state(GameMode::Inventory)));
+                render_inventory_screen.run_if(in_state(GameMode::Inventory)))
+            // Death/win screen
+            .add_systems(EguiPrimaryContextPass,
+                render_death_screen_system.run_if(in_state(GameMode::GameOver).or(in_state(GameMode::Won))))
+            .add_systems(Update,
+                death_screen_input.run_if(in_state(GameMode::GameOver).or(in_state(GameMode::Won))));
     }
 }
 
@@ -193,6 +201,8 @@ fn check_chargen_complete(
         player.max_hp = player.hp;
         player.mp = 3 + sp.int_stat() / 2;
         player.max_mp = player.mp;
+        player.species_name = sp.name.clone();
+        player.job_name = job.name.clone();
         messages.add(format!("You are a {} {}.", sp.name, job.name));
     }
     next_phase.set(GamePhase::Playing);
@@ -481,6 +491,53 @@ fn apply_visibility(
 
 fn camera_follow(player: Res<Player>, mut q: Query<&mut Transform, (With<Camera2d>, Without<PlayerSprite>, Without<MonsterTag>)>) {
     for mut t in &mut q { let w = player.pos.to_world(); t.translation.x = w.x; t.translation.y = w.y; }
+}
+
+fn autoexplore_system(
+    mut player: ResMut<Player>,
+    mut pending: ResMut<PendingMove>,
+    terrain: Res<TerrainGrid>,
+    vis: Res<VisibilityMap>,
+    grid: Res<MonsterGrid>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    monsters: Query<&Position, With<MonsterTag>>,
+    mut messages: ResMut<MessageLog>,
+) {
+    // Toggle autoexplore on 'o'
+    if keyboard.just_pressed(KeyCode::KeyO) {
+        player.autoexploring = !player.autoexploring;
+        if player.autoexploring {
+            messages.add("Autoexploring...");
+        } else {
+            messages.add("Stopped exploring.");
+        }
+    }
+
+    // Any other key press stops autoexplore
+    if player.autoexploring && keyboard.get_just_pressed().any(|k| *k != KeyCode::KeyO) {
+        player.autoexploring = false;
+    }
+
+    if !player.autoexploring { return }
+
+    // Interrupt if monster in FOV
+    for pos in monsters.iter() {
+        if vis.is_visible(pos.0) {
+            player.autoexploring = false;
+            messages.add("You see a monster! Stopped exploring.");
+            return;
+        }
+    }
+
+    // Find next step toward nearest unexplored tile
+    if let Some(next) = pathfind::nearest_unexplored(player.pos, &terrain, &grid, &vis.explored) {
+        let dx = next.x - player.pos.x;
+        let dy = next.y - player.pos.y;
+        pending.command = Some((dx.signum(), dy.signum()));
+    } else {
+        player.autoexploring = false;
+        messages.add("Fully explored.");
+    }
 }
 
 fn player_input(keyboard: Res<ButtonInput<KeyCode>>, mut pending: ResMut<PendingMove>) {
@@ -798,6 +855,7 @@ fn check_monster_death(mut commands: Commands,
             grid.set(pos.0, None);
             commands.entity(entity).despawn();
             player.xp += xp_gain;
+            player.kills += 1;
             // Level up check
             while player.xp >= player.xp_next {
                 player.xl += 1;
@@ -829,15 +887,9 @@ fn monster_ai(mut player: ResMut<Player>,
         if dist <= 1 {
             attacks.push((name.0.clone(), attack.damage, attack.attack_type.clone(), hd.0));
         } else if dist <= 8 {
-            let dx = (pp.x - pos.0.x).signum();
-            let dy = (pp.y - pos.0.y).signum();
-            for (mx, my) in [(dx, dy), (dx, 0), (0, dy)] {
-                if mx == 0 && my == 0 { continue }
-                let np = Coord::new(pos.0.x + mx, pos.0.y + my);
-                if np == pp { break }
-                if terrain.is_passable(np) && grid.get(np).is_none() {
-                    moves.push((entity, pos.0, np));
-                    break;
+            if let Some(next_step) = pathfind::astar_next_step(pos.0, pp, &terrain, &grid) {
+                if next_step != pp && terrain.is_passable(next_step) && grid.get(next_step).is_none() {
+                    moves.push((entity, pos.0, next_step));
                 }
             }
         }
@@ -867,6 +919,38 @@ fn monster_ai(mut player: ResMut<Player>,
     }
 
     player.turn_is_over = false;
+}
+
+fn render_death_screen_system(mut contexts: EguiContexts, mut state: ResMut<LituiState>,
+    player: Res<Player>, level: Res<CurrentLevel>, game_mode: Res<State<GameMode>>) -> Result {
+    let is_win = **game_mode == GameMode::Won;
+    state.death_title = if is_win { "Victory!".into() } else { "Game Over".into() };
+    state.death_cause = if is_win {
+        "You escaped the dungeon with the Orb of Zot!".into()
+    } else {
+        "You have been slain.".into()
+    };
+    state.death_species = player.species_name.clone();
+    state.death_job = player.job_name.clone();
+    state.death_xl = format!("{}", player.xl);
+    state.death_turns = format!("{}", player.turns);
+    state.death_depth = format!("D:{}", level.depth);
+    state.death_gold = format!("{}", player.gold);
+    state.death_kills = format!("{}", player.kills);
+    state.death_weapon = player.weapon_name();
+    state.death_armour = player.armour_name();
+
+    egui::CentralPanel::default().show(contexts.ctx_mut()?, |ui| {
+        render_death_screen(ui, &mut state);
+    });
+    Ok(())
+}
+
+fn death_screen_input(keyboard: Res<ButtonInput<KeyCode>>, mut app_exit: MessageWriter<AppExit>) {
+    if keyboard.just_pressed(KeyCode::Escape) {
+        app_exit.write(AppExit::Success);
+    }
+    // TODO: Enter to restart (requires full state reset)
 }
 
 fn check_player_death(player: Res<Player>, mut messages: ResMut<MessageLog>, mut ns: ResMut<NextState<GameMode>>) {

@@ -33,8 +33,12 @@ pub struct Player {
     pub base_damage: i32,
     pub base_ac: i32,
     pub status: StatusEffects,
-    pub regen_counter: i32, // counts turns for HP regen
-    pub turns: i32,         // total turns taken
+    pub regen_counter: i32,
+    pub turns: i32,
+    pub autoexploring: bool,
+    pub kills: i32,
+    pub species_name: String,
+    pub job_name: String,
 }
 
 impl Default for Player {
@@ -52,6 +56,10 @@ impl Default for Player {
             status: StatusEffects::default(),
             regen_counter: 0,
             turns: 0,
+            autoexploring: false,
+            kills: 0,
+            species_name: String::new(),
+            job_name: String::new(),
         }
     }
 }
