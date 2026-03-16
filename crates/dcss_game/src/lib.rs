@@ -6,6 +6,7 @@ use bevy_egui::EguiPrimaryContextPass;
 use rand::Rng;
 
 use dcss_core::combat;
+use dcss_core::level::{CurrentLevel, StairsAction, StairsDirection};
 use dcss_core::message::MessageLog;
 use dcss_core::monster::*;
 use dcss_core::player::{Player, PlayerSprite};
@@ -40,13 +41,15 @@ impl Plugin for DcssGamePlugin {
             .init_resource::<TerrainSpriteGrid>()
             .init_resource::<examine::ExamineCursor>()
             .init_resource::<examine::MonsterInfoState>()
+            .init_resource::<CurrentLevel>()
+            .init_resource::<StairsAction>()
             .add_systems(Startup, (dcss_tiles::load_tiles, setup_camera))
             .add_systems(Startup,
                 (load_monster_defs, generate_dungeon, spawn_dungeon, spawn_player, spawn_monsters, spawn_examine_cursor, welcome_message)
                     .chain().after(dcss_tiles::load_tiles))
             .add_systems(Update, player_input.run_if(in_state(GameMode::Play)))
             .add_systems(Update,
-                (execute_player_action, check_monster_death, monster_ai, check_player_death)
+                (execute_player_action, handle_stairs_input, check_monster_death, monster_ai, check_player_death)
                     .chain().run_if(in_state(GameMode::Play)).after(player_input))
             .add_systems(Update,
                 (sync_player_sprite, sync_monster_sprites, camera_follow)
@@ -159,6 +162,56 @@ fn player_input(keyboard: Res<ButtonInput<KeyCode>>, mut pending: ResMut<Pending
     else if keyboard.just_pressed(KeyCode::KeyN) { Some((1,1)) }
     else { None };
     if d.is_some() { pending.command = d; }
+}
+
+fn handle_stairs_input(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut player: ResMut<Player>,
+    terrain: Res<TerrainGrid>,
+    mut level: ResMut<CurrentLevel>,
+    mut messages: ResMut<MessageLog>,
+    mut commands: Commands,
+    monster_query: Query<Entity, With<MonsterTag>>,
+    terrain_sprites: Query<Entity, With<TerrainSpriteMarker>>,
+    mut grid: ResMut<MonsterGrid>,
+    mut sprite_grid: ResMut<TerrainSpriteGrid>,
+    tiles: Res<TileRegistry>,
+) {
+    if !keyboard.just_pressed(KeyCode::Period) || !keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+        return;
+    }
+    if terrain.get(player.pos) != Some(Feature::StairsDown) {
+        messages.add("There are no stairs here.");
+        return;
+    }
+
+    // Despawn old level
+    for entity in monster_query.iter() { commands.entity(entity).despawn(); }
+    for entity in terrain_sprites.iter() { commands.entity(entity).despawn(); }
+    *grid = MonsterGrid::default();
+    *sprite_grid = TerrainSpriteGrid::default();
+
+    level.depth += 1;
+    messages.add(format!("You descend to {}:{}.", level.branch, level.depth));
+
+    // Generate new level from a vault
+    let des_path = "crawl-ref/source/dat/des/arrival/simple.des";
+    let new_grid = match load_des_vault(des_path, (level.depth as usize) % 20) {
+        Ok((g, pos, name)) => { messages.add(format!("Level: {}", name)); player.pos = pos; g }
+        Err(_) => { player.pos = Coord::new(5, 5); terrain::hardcoded_dungeon() }
+    };
+
+    // Spawn new terrain sprites
+    for y in 0..MAP_HEIGHT { for x in 0..MAP_WIDTH {
+        let pos = Coord::new(x as i32, y as i32);
+        let e = commands.spawn((TerrainSpriteMarker, GridPos(pos),
+            Sprite::from_image(tiles.get(feature_to_tile(new_grid.cells[y][x]))),
+            Transform::from_xyz(x as f32 * TILE_SIZE, -(y as f32) * TILE_SIZE, 0.0))).id();
+        sprite_grid.set(pos, Some(e));
+    }}
+    commands.insert_resource(new_grid);
+    player.turn_is_over = true;
+    player.time_taken = 10;
 }
 
 fn execute_player_action(mut pending: ResMut<PendingMove>, mut player: ResMut<Player>,

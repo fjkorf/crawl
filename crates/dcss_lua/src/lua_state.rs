@@ -12,6 +12,7 @@ use mlua::prelude::*;
 use std::collections::HashMap;
 
 use crate::des_parser::RawMapDef;
+use crate::subst;
 
 /// A parsed and Lua-executed map definition.
 #[derive(Debug, Clone, Default)]
@@ -94,8 +95,14 @@ pub fn execute_raw_map(lua: &Lua, raw: &RawMapDef) -> LuaResult<MapDef> {
             })?;
     }
 
-    // Extract the populated MapDef
-    let result = ud.borrow::<MapDef>()?.clone();
+    // Extract the populated MapDef and apply glyph substitutions
+    let mut result = ud.borrow::<MapDef>()?.clone();
+    subst::apply_substitutions(
+        &mut result.map_lines,
+        &result.subst,
+        &result.nsubst,
+        &result.shuffle,
+    );
     Ok(result)
 }
 

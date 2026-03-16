@@ -6,3 +6,4 @@ version = "0.1.0"
 
 [dependencies]
 mlua = { version = "0.10", features = ["lua51", "vendored"] }
+rand = "0.9"
