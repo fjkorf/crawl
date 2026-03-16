@@ -19,7 +19,9 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use bevy_egui::EguiPlugin;
 
-use dcss_core::turn::PendingMove;
+use dcss_core::turn::{GameMode, PendingMove};
+use dcss_core::types::Coord;
+use dcss_ui::examine::ExamineCursor;
 use plugin::DcssGamePlugin;
 
 // --- Separate, focused resources ---
@@ -35,6 +37,10 @@ enum WalkthroughStep {
     Move(i32, i32),
     WaitFrames(u32),
     Screenshot(String),
+    EnterExamine,
+    ExamineAt(i32, i32),
+    ExamineOpen,
+    ExitExamine,
 }
 
 #[derive(Resource)]
@@ -109,6 +115,8 @@ fn walkthrough_system(
     mut commands: Commands,
     mut queue: ResMut<WalkthroughQueue>,
     mut pending: ResMut<PendingMove>,
+    mut cursor: ResMut<ExamineCursor>,
+    mut next_state: ResMut<NextState<GameMode>>,
     mut exit: MessageWriter<AppExit>,
     mut wait: Local<u32>,
 ) {
@@ -139,6 +147,21 @@ fn walkthrough_system(
                 .spawn(Screenshot::primary_window())
                 .observe(save_to_disk(path));
         }
+        WalkthroughStep::EnterExamine => {
+            next_state.set(GameMode::Examine);
+            cursor.showing_popup = false;
+        }
+        WalkthroughStep::ExamineAt(x, y) => {
+            cursor.pos = Coord::new(x, y);
+            cursor.showing_popup = false;
+        }
+        WalkthroughStep::ExamineOpen => {
+            cursor.showing_popup = true;
+        }
+        WalkthroughStep::ExitExamine => {
+            cursor.showing_popup = false;
+            next_state.set(GameMode::Play);
+        }
     }
 }
 
@@ -154,6 +177,17 @@ fn build_walkthrough(output_dir: &str) -> VecDeque<WalkthroughStep> {
     // Room 1 screenshot — player starts at (5,5), goblin at (8,4)
     s.push_back(Screenshot(format!("{}/room1.png", output_dir)));
     s.push_back(WaitFrames(5));
+
+    // Examine the goblin at (8,4)
+    s.push_back(EnterExamine);
+    s.push_back(WaitFrames(2));
+    s.push_back(ExamineAt(8, 4));
+    s.push_back(ExamineOpen);
+    s.push_back(WaitFrames(3));
+    s.push_back(Screenshot(format!("{}/examine_goblin.png", output_dir)));
+    s.push_back(WaitFrames(3));
+    s.push_back(ExitExamine);
+    s.push_back(WaitFrames(2));
 
     // Walk right from (5,5) toward door at (13,5): 7 steps to (12,5)
     for _ in 0..7 {

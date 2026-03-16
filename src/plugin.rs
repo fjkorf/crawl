@@ -11,7 +11,7 @@ use dcss_core::terrain::{self, Feature, TerrainGrid, TerrainSpriteGrid};
 use dcss_core::turn::{GameMode, PendingMove};
 use dcss_core::types::*;
 use dcss_tiles::{self, TileId, TileRegistry, TILE_SIZE};
-use dcss_ui::{message_panel, stat_panel};
+use dcss_ui::{examine, message_panel, stat_panel};
 
 pub struct DcssGamePlugin;
 
@@ -26,11 +26,12 @@ impl Plugin for DcssGamePlugin {
             .init_resource::<MessageLog>()
             .init_resource::<PendingMove>()
             .init_resource::<TerrainSpriteGrid>()
+            .init_resource::<examine::ExamineCursor>()
             // Startup
             .add_systems(Startup, (dcss_tiles::load_tiles, setup_camera))
             .add_systems(
                 Startup,
-                (load_monster_defs, spawn_dungeon, spawn_player, spawn_monsters, welcome_message)
+                (load_monster_defs, spawn_dungeon, spawn_player, spawn_monsters, spawn_examine_cursor, welcome_message)
                     .chain()
                     .after(dcss_tiles::load_tiles),
             )
@@ -54,12 +55,64 @@ impl Plugin for DcssGamePlugin {
                     .run_if(in_state(GameMode::Play))
                     .after(execute_player_action),
             )
-            // egui panels
+            // Play mode: x key enters examine mode
+            .add_systems(
+                Update,
+                enter_examine_mode.run_if(in_state(GameMode::Play)),
+            )
+            // Play mode: hide examine cursor
+            .add_systems(
+                Update,
+                examine::hide_examine_cursor.run_if(in_state(GameMode::Play)),
+            )
+            // Examine mode systems
+            .add_systems(
+                Update,
+                (examine::examine_input_system, examine::examine_cursor_sync)
+                    .chain()
+                    .run_if(in_state(GameMode::Examine)),
+            )
+            // egui panels (always)
             .add_systems(
                 EguiPrimaryContextPass,
-                (stat_panel::stat_panel_system, message_panel::message_panel_system).chain(),
+                (
+                    stat_panel::stat_panel_system,
+                    message_panel::message_panel_system,
+                    examine::examine_popup_system,
+                )
+                    .chain(),
             );
     }
+}
+
+// --- Examine Mode ---
+
+fn enter_examine_mode(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    player: Res<Player>,
+    mut cursor: ResMut<examine::ExamineCursor>,
+    mut next_state: ResMut<NextState<GameMode>>,
+    mut messages: ResMut<MessageLog>,
+) {
+    if keyboard.just_pressed(KeyCode::KeyX) {
+        cursor.pos = player.pos;
+        cursor.showing_popup = false;
+        next_state.set(GameMode::Examine);
+        messages.add("Examine mode. Move cursor with arrow keys. Enter to inspect. Escape to exit.");
+    }
+}
+
+fn spawn_examine_cursor(mut commands: Commands) {
+    commands.spawn((
+        examine::ExamineCursorSprite,
+        Sprite {
+            color: Color::srgba(1.0, 1.0, 0.0, 0.3),
+            custom_size: Some(Vec2::new(TILE_SIZE, TILE_SIZE)),
+            ..default()
+        },
+        Transform::from_xyz(0.0, 0.0, 2.0),
+        Visibility::Hidden,
+    ));
 }
 
 // --- Camera ---

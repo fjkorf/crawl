@@ -114,7 +114,7 @@ fn walkthrough_all_rooms() {
 
     run_walkthrough_capture(dir);
 
-    for room in ["room1", "room2", "room3", "room4"] {
+    for room in ["room1", "examine_goblin", "room2", "room3", "room4"] {
         let baseline = format!("tests/snapshots/{}.png", room);
         let new_file = format!("{}/{}.png", dir, room);
         assert!(
@@ -144,7 +144,7 @@ fn update_all_baselines() {
 
     // Walkthrough baselines
     run_walkthrough_capture("tests/snapshots");
-    for room in ["room1", "room2", "room3", "room4"] {
+    for room in ["room1", "examine_goblin", "room2", "room3", "room4"] {
         let path = format!("tests/snapshots/{}.png", room);
         assert!(Path::new(&path).exists(), "missing {}", path);
         println!("Updated: {}", path);
