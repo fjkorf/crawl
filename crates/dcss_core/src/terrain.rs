@@ -151,15 +151,15 @@ pub fn ensure_stairs(grid: &mut TerrainGrid, depth: i32, max_depth: i32) {
         }
     }
 
-    // D:1 needs no up-stairs (surface exit handled separately)
-    // Last level needs no down-stairs (orb level)
+    // Last level (orb level) needs no down-stairs
     if !has_down && depth < max_depth && !floor_tiles.is_empty() {
         let idx = rng.random_range(0..floor_tiles.len());
         let pos = floor_tiles.swap_remove(idx);
         grid.cells[pos.y as usize][pos.x as usize] = Feature::StairsDown;
     }
 
-    if !has_up && depth > 1 && !floor_tiles.is_empty() {
+    // All levels get up-stairs (D:1 up-stairs = dungeon exit to surface)
+    if !has_up && !floor_tiles.is_empty() {
         let idx = rng.random_range(0..floor_tiles.len());
         let pos = floor_tiles[idx];
         grid.cells[pos.y as usize][pos.x as usize] = Feature::StairsUp;
