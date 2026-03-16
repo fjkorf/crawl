@@ -71,6 +71,60 @@ impl TerrainSpriteGrid {
     }
 }
 
+/// Convert .des map glyph to a terrain feature.
+pub fn glyph_to_feature(ch: char) -> Feature {
+    match ch {
+        'x' | 'X' | 'c' | 'v' | 'b' => Feature::Wall,
+        '.' | '{' | '}' | '(' | ')' | '[' | ']' | '@' => Feature::Floor,
+        '+' => Feature::ClosedDoor,
+        '>' => Feature::StairsDown,
+        ' ' => Feature::Wall, // space = rock/wall
+        // Water, lava, etc. — treat as floor for now
+        'w' | 'W' | 'l' => Feature::Floor,
+        // Trees, statues — treat as wall
+        't' | 'G' => Feature::Wall,
+        // Monster/item glyphs — floor underneath
+        '0'..='9' | 'A'..='Z' | 'a'..='z' => Feature::Floor,
+        // Default: anything else is floor
+        _ => Feature::Floor,
+    }
+}
+
+/// Create a TerrainGrid from .des map lines.
+/// The map is centered in the grid. Returns the grid and the player start position.
+pub fn from_map_lines(lines: &[String]) -> (TerrainGrid, Coord) {
+    let mut cells = [[Feature::Wall; MAP_WIDTH]; MAP_HEIGHT];
+    let map_height = lines.len().min(MAP_HEIGHT);
+    let map_width = lines.iter().map(|l| l.len()).max().unwrap_or(0).min(MAP_WIDTH);
+
+    // Center the vault in the grid
+    let offset_y = (MAP_HEIGHT.saturating_sub(map_height)) / 2;
+    let offset_x = (MAP_WIDTH.saturating_sub(map_width)) / 2;
+
+    let mut player_pos = Coord::new(offset_x as i32 + 1, offset_y as i32 + 1);
+
+    for (y, line) in lines.iter().enumerate() {
+        if y >= MAP_HEIGHT {
+            break;
+        }
+        for (x, ch) in line.chars().enumerate() {
+            if x >= MAP_WIDTH {
+                break;
+            }
+            let grid_x = offset_x + x;
+            let grid_y = offset_y + y;
+            if grid_x < MAP_WIDTH && grid_y < MAP_HEIGHT {
+                cells[grid_y][grid_x] = glyph_to_feature(ch);
+                if ch == '{' || ch == '@' {
+                    player_pos = Coord::new(grid_x as i32, grid_y as i32);
+                }
+            }
+        }
+    }
+
+    (TerrainGrid { cells }, player_pos)
+}
+
 /// Create a hardcoded multi-room dungeon for the MVP.
 pub fn hardcoded_dungeon() -> TerrainGrid {
     use Feature::*;

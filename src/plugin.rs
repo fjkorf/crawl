@@ -11,7 +11,22 @@ use dcss_core::terrain::{self, Feature, TerrainGrid, TerrainSpriteGrid};
 use dcss_core::turn::{GameMode, PendingMove};
 use dcss_core::types::*;
 use dcss_tiles::{self, TileId, TileRegistry, TILE_SIZE};
+use dcss_lua::des_parser;
+use dcss_lua::lua_state;
 use dcss_ui::{examine, message_panel, stat_panel};
+
+/// Controls where the dungeon comes from.
+#[derive(Resource, Default)]
+pub enum DungeonSource {
+    /// Use the hardcoded 4-room test dungeon.
+    #[default]
+    Hardcoded,
+    /// Load a vault from a .des file.
+    DesVault {
+        des_file: String,
+        vault_index: usize,
+    },
+}
 
 pub struct DcssGamePlugin;
 
@@ -19,7 +34,7 @@ impl Plugin for DcssGamePlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<GameMode>()
             .insert_resource(ClearColor(Color::srgb(0.1, 0.0, 0.2)))
-            .insert_resource(terrain::hardcoded_dungeon())
+            .init_resource::<DungeonSource>()
             .init_resource::<Player>()
             .init_resource::<MonsterGrid>()
             .init_resource::<MonsterDefs>()
@@ -32,7 +47,7 @@ impl Plugin for DcssGamePlugin {
             .add_systems(Startup, (dcss_tiles::load_tiles, setup_camera))
             .add_systems(
                 Startup,
-                (load_monster_defs, spawn_dungeon, spawn_player, spawn_monsters, spawn_examine_cursor, welcome_message)
+                (load_monster_defs, generate_dungeon, spawn_dungeon, spawn_player, spawn_monsters, spawn_examine_cursor, welcome_message)
                     .chain()
                     .after(dcss_tiles::load_tiles),
             )
@@ -114,6 +129,77 @@ fn spawn_examine_cursor(mut commands: Commands) {
         Transform::from_xyz(0.0, 0.0, 2.0),
         Visibility::Hidden,
     ));
+}
+
+// --- Dungeon Generation ---
+
+fn generate_dungeon(
+    mut commands: Commands,
+    source: Res<DungeonSource>,
+    mut player: ResMut<Player>,
+    mut messages: ResMut<MessageLog>,
+) {
+    let (grid, player_pos) = match &*source {
+        DungeonSource::Hardcoded => {
+            let grid = terrain::hardcoded_dungeon();
+            (grid, Coord::new(5, 5))
+        }
+        DungeonSource::DesVault {
+            des_file,
+            vault_index,
+        } => {
+            match load_des_vault(des_file, *vault_index) {
+                Ok((grid, pos, vault_name)) => {
+                    messages.add(format!("Loaded vault: {}", vault_name));
+                    (grid, pos)
+                }
+                Err(e) => {
+                    eprintln!("Failed to load .des vault: {}. Falling back to hardcoded.", e);
+                    messages.add(format!("Vault load failed: {}. Using hardcoded dungeon.", e));
+                    let grid = terrain::hardcoded_dungeon();
+                    (grid, Coord::new(5, 5))
+                }
+            }
+        }
+    };
+
+    player.pos = player_pos;
+    commands.insert_resource(grid);
+}
+
+fn load_des_vault(
+    des_file: &str,
+    vault_index: usize,
+) -> Result<(TerrainGrid, Coord, String), String> {
+    let content =
+        std::fs::read_to_string(des_file).map_err(|e| format!("read {}: {}", des_file, e))?;
+    let parsed = des_parser::parse_des_file(&content, des_file)?;
+
+    if vault_index >= parsed.maps.len() {
+        return Err(format!(
+            "vault index {} out of range (file has {})",
+            vault_index,
+            parsed.maps.len()
+        ));
+    }
+
+    let dlua_base = "crawl-ref/source/dat/dlua";
+    let lua =
+        lua_state::create_dlua_with_base(dlua_base).map_err(|e| format!("create lua: {}", e))?;
+
+    // Load global prelude
+    if !parsed.global_prelude.is_empty() {
+        lua.load(&parsed.global_prelude)
+            .exec()
+            .map_err(|e| format!("global prelude: {}", e))?;
+    }
+
+    let raw = &parsed.maps[vault_index];
+    let map_def =
+        lua_state::execute_raw_map(&lua, raw).map_err(|e| format!("execute vault: {}", e))?;
+
+    let (grid, player_pos) = terrain::from_map_lines(&map_def.map_lines);
+    Ok((grid, player_pos, map_def.name))
 }
 
 // --- Camera ---

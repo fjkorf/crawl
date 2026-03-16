@@ -64,8 +64,21 @@ fn main() {
         ..default()
     }))
     .add_plugins(EguiPlugin::default())
-    .add_plugins(DcssGamePlugin)
-    .init_resource::<FrameCount>()
+    .add_plugins(DcssGamePlugin);
+
+    // DES_FILE env var loads a vault from a .des file
+    if let Ok(des_file) = std::env::var("DES_FILE") {
+        let vault_index: usize = std::env::var("DES_VAULT_INDEX")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        app.insert_resource(plugin::DungeonSource::DesVault {
+            des_file,
+            vault_index,
+        });
+    }
+
+    app.init_resource::<FrameCount>()
     .add_systems(Update, tick_frame);
 
     match mode.as_str() {
