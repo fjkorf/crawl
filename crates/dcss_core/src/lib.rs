@@ -9,6 +9,7 @@ pub mod level;
 pub mod chargen;
 pub mod item;
 pub mod enums;
+pub mod fov;
 
 #[cfg(test)]
 mod tests;

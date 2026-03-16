@@ -7,6 +7,7 @@ use rand::Rng;
 
 use dcss_core::chargen::{self, ChargenState, SpeciesDefs, JobDefs};
 use dcss_core::combat;
+use dcss_core::fov::VisibilityMap;
 use dcss_core::item::{self, Inventory, ItemTag, ItemName, ItemData, ItemPosition};
 use dcss_core::level::{CurrentLevel, LevelStore, SavedLevel, SavedMonster, SavedItem, StairsAction, StairsDirection, MAX_DEPTH};
 use dcss_core::message::MessageLog;
@@ -47,6 +48,7 @@ impl Plugin for DcssGamePlugin {
             .init_resource::<CurrentLevel>()
             .init_resource::<StairsAction>()
             .init_resource::<LevelStore>()
+            .init_resource::<VisibilityMap>()
             .init_resource::<SpeciesDefs>()
             .init_resource::<JobDefs>()
             .init_resource::<ChargenState>()
@@ -69,10 +71,10 @@ impl Plugin for DcssGamePlugin {
                 (execute_player_action, handle_stairs_input, check_monster_death, monster_ai, check_player_death)
                     .chain().run_if(in_state(GameMode::Play)).run_if(in_state(GamePhase::Playing)).after(player_input))
             .add_systems(Update,
-                (sync_player_sprite, sync_monster_sprites, camera_follow)
-                    .run_if(in_state(GamePhase::Playing)).after(execute_player_action))
+                (update_fov, sync_player_sprite, sync_monster_sprites, apply_visibility, camera_follow)
+                    .chain().run_if(in_state(GamePhase::Playing)).after(execute_player_action))
             .add_systems(Update,
-                (enter_examine_mode, toggle_inventory, examine::hide_examine_cursor)
+                (enter_examine_mode, toggle_inventory, handle_item_use, examine::hide_examine_cursor)
                     .run_if(in_state(GameMode::Play)).run_if(in_state(GamePhase::Playing)))
             .add_systems(Update,
                 (examine::examine_input_system, examine::examine_cursor_sync)
@@ -220,6 +222,57 @@ fn render_inventory_screen(mut contexts: EguiContexts, mut state: ResMut<LituiSt
     Ok(())
 }
 
+fn handle_item_use(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut player: ResMut<Player>,
+    mut inventory: ResMut<Inventory>,
+    mut messages: ResMut<MessageLog>,
+) {
+    // q = quaff first potion
+    if keyboard.just_pressed(KeyCode::KeyQ) {
+        if let Some(idx) = inventory.items.iter().position(|i| i.class == item::ItemClass::Potion) {
+            let potion = inventory.items.remove(idx);
+            if potion.name.contains("healing") {
+                let healed = (player.max_hp - player.hp).min(10 + player.xl);
+                player.hp += healed;
+                messages.add(format!("You drink the {}. You feel better. (+{} HP)", potion.name, healed));
+            } else {
+                messages.add(format!("You drink the {}.", potion.name));
+            }
+            player.turn_is_over = true;
+            player.time_taken = 10;
+        } else {
+            messages.add("You have no potions.");
+        }
+    }
+
+    // w = wield first weapon
+    if keyboard.just_pressed(KeyCode::KeyW) && !keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+        if let Some(idx) = inventory.items.iter().position(|i| i.class == item::ItemClass::Weapon) {
+            let weapon = inventory.items.remove(idx);
+            messages.add(format!("You wield the {}.", weapon.name));
+            if let Some(old) = player.equipped_weapon.replace(weapon) {
+                inventory.items.push(old);
+            }
+        } else {
+            messages.add("You have no weapons.");
+        }
+    }
+
+    // W (shift+w) = wear first armour
+    if keyboard.just_pressed(KeyCode::KeyW) && keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+        if let Some(idx) = inventory.items.iter().position(|i| i.class == item::ItemClass::Armour) {
+            let armour = inventory.items.remove(idx);
+            messages.add(format!("You wear the {}.", armour.name));
+            if let Some(old) = player.equipped_armour.replace(armour) {
+                inventory.items.push(old);
+            }
+        } else {
+            messages.add("You have no armour.");
+        }
+    }
+}
+
 fn close_inventory(keyboard: Res<ButtonInput<KeyCode>>, mut next_state: ResMut<NextState<GameMode>>) {
     if keyboard.just_pressed(KeyCode::KeyI) || keyboard.just_pressed(KeyCode::Escape) {
         next_state.set(GameMode::Play);
@@ -304,8 +357,11 @@ fn setup_camera(mut commands: Commands) {
 }
 
 fn welcome_message(mut messages: ResMut<MessageLog>) {
-    messages.add("Welcome to the dungeon! Use arrow keys or hjkl to move.");
-    messages.add("Walk into monsters to attack. Press x to examine.");
+    messages.add("Welcome to the dungeon!");
+    messages.add("Move: arrow keys or hjkl. Attack: walk into monsters.");
+    messages.add("Stairs: Shift+> down, Shift+< up. Examine: x. Inventory: i.");
+    messages.add("Quaff potion: q. Wield weapon: w. Wear armour: Shift+W.");
+    messages.add("Find the Orb of Zot on D:5 and return to the surface!");
 }
 
 #[derive(Component)] pub struct TerrainSpriteMarker;
@@ -344,6 +400,37 @@ fn sync_player_sprite(player: Res<Player>, mut q: Query<&mut Transform, With<Pla
 
 fn sync_monster_sprites(mut q: Query<(&Position, &mut Transform), (With<MonsterTag>, Without<PlayerSprite>, Without<Camera2d>)>) {
     for (pos, mut t) in &mut q { let w = pos.0.to_world(); t.translation.x = w.x; t.translation.y = w.y; }
+}
+
+fn update_fov(player: Res<Player>, terrain: Res<TerrainGrid>, mut vis: ResMut<VisibilityMap>) {
+    vis.calculate(player.pos, 8, &terrain);
+}
+
+fn apply_visibility(
+    vis: Res<VisibilityMap>,
+    mut terrain_sprites: Query<(&GridPos, &mut Sprite), (With<TerrainSpriteMarker>, Without<MonsterTag>)>,
+    mut monster_sprites: Query<(&Position, &mut Sprite, &mut Visibility), (With<MonsterTag>, Without<TerrainSpriteMarker>)>,
+) {
+    // Tint terrain based on visibility
+    for (gpos, mut sprite) in &mut terrain_sprites {
+        if vis.is_visible(gpos.0) {
+            sprite.color = Color::WHITE;
+        } else if vis.is_explored(gpos.0) {
+            sprite.color = Color::srgba(0.3, 0.3, 0.4, 1.0);
+        } else {
+            sprite.color = Color::srgba(0.0, 0.0, 0.0, 1.0);
+        }
+    }
+
+    // Show/hide monsters based on visibility
+    for (pos, mut sprite, mut vis_component) in &mut monster_sprites {
+        if vis.is_visible(pos.0) {
+            sprite.color = Color::WHITE;
+            *vis_component = Visibility::Visible;
+        } else {
+            *vis_component = Visibility::Hidden;
+        }
+    }
 }
 
 fn camera_follow(player: Res<Player>, mut q: Query<&mut Transform, (With<Camera2d>, Without<PlayerSprite>, Without<MonsterTag>)>) {
