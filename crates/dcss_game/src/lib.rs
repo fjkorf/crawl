@@ -18,7 +18,7 @@ use dcss_core::types::*;
 use dcss_lua::des_parser;
 use dcss_lua::lua_state;
 use dcss_tiles::{self, TileId, TileRegistry, TILE_SIZE};
-use dcss_ui::{chargen_screen, examine, inventory_screen, message_panel, stat_panel};
+use dcss_ui::{examine, message_panel, stat_panel, LituiState, render_chargen, render_inventory};
 
 /// Controls where the dungeon comes from.
 #[derive(Resource, Default)]
@@ -43,7 +43,7 @@ impl Plugin for DcssGamePlugin {
             .init_resource::<PendingMove>()
             .init_resource::<TerrainSpriteGrid>()
             .init_resource::<examine::ExamineCursor>()
-            .init_resource::<examine::MonsterInfoState>()
+            .init_resource::<LituiState>()
             .init_resource::<CurrentLevel>()
             .init_resource::<StairsAction>()
             .init_resource::<SpeciesDefs>()
@@ -53,9 +53,11 @@ impl Plugin for DcssGamePlugin {
             // Startup: load data + camera (always needed)
             .add_systems(Startup, (dcss_tiles::load_tiles, setup_camera, load_chargen_data_system, load_monster_defs))
             // Character creation phase
+            .add_systems(Update,
+                (populate_chargen_state, check_chargen_complete)
+                    .chain().run_if(in_state(GamePhase::CharacterCreation)))
             .add_systems(EguiPrimaryContextPass,
-                chargen_screen::chargen_screen_system.run_if(in_state(GamePhase::CharacterCreation)))
-            .add_systems(Update, check_chargen_complete.run_if(in_state(GamePhase::CharacterCreation)))
+                render_chargen_screen.run_if(in_state(GamePhase::CharacterCreation)))
             // Playing phase: setup when entering
             .add_systems(OnEnter(GamePhase::Playing),
                 (generate_dungeon, spawn_dungeon, spawn_player, spawn_monsters, spawn_floor_items, spawn_examine_cursor, welcome_message)
@@ -75,34 +77,68 @@ impl Plugin for DcssGamePlugin {
                 (examine::examine_input_system, examine::examine_cursor_sync)
                     .chain().run_if(in_state(GameMode::Examine)))
             .add_systems(Update, close_inventory.run_if(in_state(GameMode::Inventory)))
+            .add_systems(Update, populate_inventory_state.run_if(in_state(GameMode::Inventory)))
             // egui panels (during playing)
             .add_systems(EguiPrimaryContextPass,
                 (stat_panel::stat_panel_system, message_panel::message_panel_system,
                  examine::examine_popup_system)
                     .chain().run_if(in_state(GamePhase::Playing)))
             .add_systems(EguiPrimaryContextPass,
-                inventory_screen::inventory_screen_system.run_if(in_state(GameMode::Inventory)));
+                render_inventory_screen.run_if(in_state(GameMode::Inventory)));
     }
 }
 
-// --- Character Creation ---
+// --- Character Creation (litui) ---
 
 fn load_chargen_data_system(mut species: ResMut<SpeciesDefs>, mut jobs: ResMut<JobDefs>) {
     chargen::load_chargen_data(&mut species, &mut jobs);
 }
 
+fn populate_chargen_state(
+    species: Res<SpeciesDefs>,
+    jobs: Res<JobDefs>,
+    mut state: ResMut<LituiState>,
+) {
+    // Populate species list if empty
+    if state.species_list.is_empty() {
+        state.species_list = species.0.iter().map(|s| format!("{} ({})", s.name, s.difficulty)).collect();
+    }
+    if state.job_list.is_empty() {
+        state.job_list = jobs.0.iter().map(|j| format!("{} ({})", j.name, j.category)).collect();
+    }
+
+    // Update preview from current selection
+    if let (Some(sp), Some(job)) = (species.0.get(state.chosen_species), jobs.0.get(state.chosen_job)) {
+        state.preview_name = format!("{} {}", sp.name, job.name);
+        state.preview_str = format!("{}", sp.str_stat());
+        state.preview_int = format!("{}", sp.int_stat());
+        state.preview_dex = format!("{}", sp.dex_stat());
+        let skills: Vec<String> = job.skills.iter().map(|(k, v)| format!("{}: {}", k, v)).collect();
+        state.preview_skills = if skills.is_empty() { "None".into() } else { skills.join(", ") };
+    }
+}
+
+fn render_chargen_screen(mut contexts: EguiContexts, mut state: ResMut<LituiState>) -> Result {
+    egui::CentralPanel::default().show(contexts.ctx_mut()?, |ui| {
+        render_chargen(ui, &mut state);
+    });
+    Ok(())
+}
+
 fn check_chargen_complete(
-    mut chargen: ResMut<ChargenState>,
+    mut litui_state: ResMut<LituiState>,
     species: Res<SpeciesDefs>,
     jobs: Res<JobDefs>,
     mut player: ResMut<Player>,
     mut messages: ResMut<MessageLog>,
     mut next_phase: ResMut<NextState<GamePhase>>,
 ) {
-    if !chargen.confirmed { return }
-    chargen.confirmed = false;
+    if litui_state.start_game_count == 0 { return }
+    litui_state.start_game_count = 0;
 
-    if let (Some(sp), Some(job)) = (species.0.get(chargen.species_index), jobs.0.get(chargen.job_index)) {
+    let species_idx = litui_state.chosen_species;
+    let job_idx = litui_state.chosen_job;
+    if let (Some(sp), Some(job)) = (species.0.get(species_idx), jobs.0.get(job_idx)) {
         player.str_stat = sp.str_stat();
         player.int_stat = sp.int_stat();
         player.dex_stat = sp.dex_stat();
@@ -121,6 +157,29 @@ fn toggle_inventory(keyboard: Res<ButtonInput<KeyCode>>, mut next_state: ResMut<
     if keyboard.just_pressed(KeyCode::KeyI) {
         next_state.set(GameMode::Inventory);
     }
+}
+
+fn populate_inventory_state(inventory: Res<Inventory>, mut state: ResMut<LituiState>) {
+    state.inv_gold = format!("{}", inventory.gold);
+    state.inv_items.clear();
+    for (i, item) in inventory.items.iter().enumerate() {
+        let mut row = dcss_ui::pages::InvItemsRow::default();
+        row.letter = format!("{}", (b'a' + i as u8) as char);
+        row.name = item.name.clone();
+        row.qty = if item.quantity > 1 { format!("x{}", item.quantity) } else { String::new() };
+        state.inv_items.push(row);
+    }
+}
+
+fn render_inventory_screen(mut contexts: EguiContexts, mut state: ResMut<LituiState>) -> Result {
+    egui::Window::new("Inventory")
+        .collapsible(false)
+        .resizable(true)
+        .default_width(350.0)
+        .show(contexts.ctx_mut()?, |ui| {
+            render_inventory(ui, &mut state);
+        });
+    Ok(())
 }
 
 fn close_inventory(keyboard: Res<ButtonInput<KeyCode>>, mut next_state: ResMut<NextState<GameMode>>) {

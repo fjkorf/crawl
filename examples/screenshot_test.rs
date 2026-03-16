@@ -75,11 +75,10 @@ fn main() {
         });
     }
 
-    // Skip character creation for automated tests
+    // Skip character creation for automated tests — go straight to Playing phase
     {
-        use dcss_core::chargen::ChargenState;
         use dcss_core::turn::GamePhase;
-        app.insert_resource(ChargenState { species_index: 0, job_index: 0, confirmed: true });
+        app.insert_resource(bevy::prelude::NextState::pending(GamePhase::Playing));
     }
 
     app.init_resource::<FrameCount>()

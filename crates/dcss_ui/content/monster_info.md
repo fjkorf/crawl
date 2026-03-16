@@ -2,7 +2,6 @@
 page:
   name: MonsterInfo
   label: Monster Info
-  default: true
 ---
 
 # [display](monster_name) {title}
