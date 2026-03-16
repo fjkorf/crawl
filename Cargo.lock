@@ -3259,6 +3259,7 @@ checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 [[package]]
 name = "litui"
 version = "0.33.3"
+source = "git+https://github.com/fjkorf/litui?branch=main#b1c03521413da66bc6b785a843a34c66693d7a82"
 dependencies = [
  "markdown_to_egui_helpers",
  "markdown_to_egui_macro",
@@ -3310,6 +3311,7 @@ dependencies = [
 [[package]]
 name = "markdown_to_egui_helpers"
 version = "0.33.3"
+source = "git+https://github.com/fjkorf/litui?branch=main#b1c03521413da66bc6b785a843a34c66693d7a82"
 dependencies = [
  "eframe",
 ]
@@ -3317,6 +3319,7 @@ dependencies = [
 [[package]]
 name = "markdown_to_egui_macro"
 version = "0.33.3"
+source = "git+https://github.com/fjkorf/litui?branch=main#b1c03521413da66bc6b785a843a34c66693d7a82"
 dependencies = [
  "markdown_to_egui_helpers",
  "proc-macro2",

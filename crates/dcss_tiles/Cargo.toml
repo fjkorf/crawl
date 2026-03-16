@@ -1,8 +1,8 @@
 [package]
 name = "dcss_tiles"
-edition = "2024"
-rust-version = "1.92"
-version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
 
 [dependencies]
-bevy = { version = "0.18", default-features = false }
+bevy.workspace = true

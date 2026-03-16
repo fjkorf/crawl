@@ -1,9 +1,9 @@
 [package]
 name = "dcss_lua"
-edition = "2024"
-rust-version = "1.92"
-version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
 
 [dependencies]
-mlua = { version = "0.10", features = ["lua51", "vendored"] }
-rand = "0.9"
+mlua.workspace = true
+rand.workspace = true

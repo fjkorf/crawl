@@ -2,11 +2,29 @@
 resolver = "3"
 members = ["crates/*"]
 
-[package]
-name = "dcss-bevy"
+[workspace.package]
 edition = "2024"
 rust-version = "1.92"
 version = "0.1.0"
+
+[workspace.dependencies]
+bevy = { version = "0.18", default-features = false }
+bevy_egui = "0.39"
+bevy_ecs = "0.18"
+egui = "0.33"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+rand = "0.9"
+mlua = { version = "0.10", features = ["lua51", "vendored"] }
+litui = { git = "https://github.com/fjkorf/litui", branch = "main" }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[package]
+name = "dcss-bevy"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
 
 [dependencies]
 dcss_core = { path = "crates/dcss_core" }
@@ -14,26 +32,18 @@ dcss_tiles = { path = "crates/dcss_tiles" }
 dcss_ui = { path = "crates/dcss_ui" }
 dcss_lua = { path = "crates/dcss_lua" }
 dcss_game = { path = "crates/dcss_game" }
-bevy = { version = "0.18", default-features = false, features = [
-    "bevy_winit",
-    "bevy_render",
-    "bevy_core_pipeline",
-    "bevy_sprite",
-    "bevy_sprite_render",
-    "bevy_text",
-    "bevy_asset",
-    "bevy_state",
-    "bevy_image",
-    "png",
-    "default_font",
-    "x11",
+bevy = { workspace = true, features = [
+    "bevy_winit", "bevy_render", "bevy_core_pipeline",
+    "bevy_sprite", "bevy_sprite_render", "bevy_text",
+    "bevy_asset", "bevy_state", "bevy_image",
+    "png", "default_font", "x11",
 ] }
-bevy_egui = "0.39"
-egui = "0.33"
-serde_yaml = "0.9"
+bevy_egui.workspace = true
+egui.workspace = true
+serde_yaml.workspace = true
 
 [dev-dependencies]
-image = { version = "0.25", default-features = false, features = ["png"] }
+image.workspace = true
 
 [[example]]
 name = "screenshot_test"
