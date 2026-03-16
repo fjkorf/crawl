@@ -1,7 +1,5 @@
-//! DCSS UI screens — litui markdown pages + egui panels.
+//! DCSS UI — all game screens rendered via litui markdown.
 
-pub mod stat_panel;
-pub mod message_panel;
 pub mod examine;
 
 // --- litui multi-page app ---
@@ -15,11 +13,13 @@ pub mod pages {
         "content/chargen.md",
         "content/inventory.md",
         "content/monster_info.md",
+        "content/stat_panel.md",
+        "content/message_log.md",
     }
 }
 
 pub use pages::{AppState as LituiState, Page as LituiPage};
-pub use pages::{render_chargen, render_inventory, render_monster_info};
+pub use pages::{render_chargen, render_inventory, render_monster_info, render_stat_panel, render_message_log};
 
 impl bevy_ecs::prelude::Resource for LituiState {}
 impl bevy_ecs::prelude::Resource for LituiPage {}

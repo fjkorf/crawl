@@ -16,6 +16,7 @@ pub enum GameMode {
     Examine,
     Inventory,
     GameOver,
+    Won,
 }
 
 /// Pending move command, set by input system, consumed by action system.

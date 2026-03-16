@@ -13,9 +13,18 @@ styles:
     color: "#AAAAAA"
   stat_value:
     color: "#FFFFFF"
-  hp_label:
+  hp_good:
     bold: true
-    color: "#00CC66"
+    color: "#00C800"
+  hp_warn:
+    bold: true
+    color: "#FFFF00"
+  hp_danger:
+    bold: true
+    color: "#FF0000"
+  mp_style:
+    bold: true
+    color: "#6464FF"
   attack_label:
     bold: true
     color: "#FF4444"

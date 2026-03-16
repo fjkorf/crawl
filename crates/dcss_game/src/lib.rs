@@ -8,7 +8,7 @@ use rand::Rng;
 use dcss_core::chargen::{self, ChargenState, SpeciesDefs, JobDefs};
 use dcss_core::combat;
 use dcss_core::item::{self, Inventory, ItemTag, ItemName, ItemData, ItemPosition};
-use dcss_core::level::{CurrentLevel, StairsAction, StairsDirection};
+use dcss_core::level::{CurrentLevel, LevelStore, SavedLevel, SavedMonster, SavedItem, StairsAction, StairsDirection, MAX_DEPTH};
 use dcss_core::message::MessageLog;
 use dcss_core::monster::*;
 use dcss_core::player::{Player, PlayerSprite};
@@ -18,7 +18,7 @@ use dcss_core::types::*;
 use dcss_lua::des_parser;
 use dcss_lua::lua_state;
 use dcss_tiles::{self, TileId, TileRegistry, TILE_SIZE};
-use dcss_ui::{examine, message_panel, stat_panel, LituiState, render_chargen, render_inventory};
+use dcss_ui::{examine, LituiState, render_chargen, render_inventory, render_stat_panel, render_message_log};
 
 /// Controls where the dungeon comes from.
 #[derive(Resource, Default)]
@@ -46,6 +46,7 @@ impl Plugin for DcssGamePlugin {
             .init_resource::<LituiState>()
             .init_resource::<CurrentLevel>()
             .init_resource::<StairsAction>()
+            .init_resource::<LevelStore>()
             .init_resource::<SpeciesDefs>()
             .init_resource::<JobDefs>()
             .init_resource::<ChargenState>()
@@ -80,7 +81,7 @@ impl Plugin for DcssGamePlugin {
             .add_systems(Update, populate_inventory_state.run_if(in_state(GameMode::Inventory)))
             // egui panels (during playing)
             .add_systems(EguiPrimaryContextPass,
-                (stat_panel::stat_panel_system, message_panel::message_panel_system,
+                (render_stat_panel_system, render_message_log_system,
                  examine::examine_popup_system)
                     .chain().run_if(in_state(GamePhase::Playing)))
             .add_systems(EguiPrimaryContextPass,
@@ -117,6 +118,43 @@ fn populate_chargen_state(
         state.preview_skills = if skills.is_empty() { "None".into() } else { skills.join(", ") };
     }
 }
+
+// --- Stat Panel (litui) ---
+
+fn render_stat_panel_system(mut contexts: EguiContexts, mut state: ResMut<LituiState>, player: Res<Player>) -> Result {
+    // Populate stat panel fields
+    let hp_frac = player.hp as f64 / player.max_hp.max(1) as f64;
+    state.hp_text = format!("{}/{}", player.hp, player.max_hp);
+    state.hp_frac = hp_frac;
+    state.hp_style = if hp_frac > 0.5 { "hp_good".into() } else if hp_frac > 0.25 { "hp_warn".into() } else { "hp_danger".into() };
+    state.mp_text = format!("{}/{}", player.mp, player.max_mp);
+    state.mp_frac = player.mp as f64 / player.max_mp.max(1) as f64;
+    state.mp_style = "mp_style".into();
+    state.stat_ac = format!("{}", player.total_ac());
+    state.stat_ev = format!("{}", player.ev);
+    state.stat_str = format!("{}", player.str_stat);
+    state.stat_int = format!("{}", player.int_stat);
+    state.stat_dex = format!("{}", player.dex_stat);
+    state.stat_xl = format!("{}", player.xl);
+    state.stat_xp = format!("{}/{}", player.xp, player.xp_next);
+    state.stat_gold = format!("{}", player.gold);
+    state.has_orb = player.has_orb;
+
+    egui::SidePanel::right("stats").resizable(false).exact_width(180.0)
+        .show(contexts.ctx_mut()?, |ui| { render_stat_panel(ui, &mut state); });
+    Ok(())
+}
+
+// --- Message Log (litui) ---
+
+fn render_message_log_system(mut contexts: EguiContexts, mut state: ResMut<LituiState>, msg_log: Res<MessageLog>) -> Result {
+    state.messages = msg_log.messages.clone();
+    egui::TopBottomPanel::bottom("messages").resizable(true).default_height(120.0)
+        .show(contexts.ctx_mut()?, |ui| { render_message_log(ui, &mut state); });
+    Ok(())
+}
+
+// --- Character Creation (litui) ---
 
 fn render_chargen_screen(mut contexts: EguiContexts, mut state: ResMut<LituiState>) -> Result {
     egui::CentralPanel::default().show(contexts.ctx_mut()?, |ui| {
@@ -244,6 +282,8 @@ fn generate_dungeon(mut commands: Commands, source: Res<DungeonSource>, mut play
             }
         }
     };
+    let mut grid = grid;
+    terrain::ensure_stairs(&mut grid, 1, MAX_DEPTH);
     player.pos = pos;
     commands.insert_resource(grid);
 }
@@ -272,9 +312,14 @@ fn welcome_message(mut messages: ResMut<MessageLog>) {
 #[derive(Component)] pub struct GridPos(pub Coord);
 
 fn feature_to_tile(f: Feature) -> TileId {
-    match f { Feature::Wall => TileId::WallBrickDark, Feature::Floor => TileId::FloorGreyDirt,
-              Feature::ClosedDoor => TileId::DoorClosed, Feature::OpenDoor => TileId::DoorOpen,
-              Feature::StairsDown => TileId::StairsDown }
+    match f {
+        Feature::Wall => TileId::WallBrickDark,
+        Feature::Floor => TileId::FloorGreyDirt,
+        Feature::ClosedDoor => TileId::DoorClosed,
+        Feature::OpenDoor => TileId::DoorOpen,
+        Feature::StairsDown => TileId::StairsDown,
+        Feature::StairsUp => TileId::StairsUp,
+    }
 }
 
 fn spawn_dungeon(mut commands: Commands, grid: Res<TerrainGrid>, tiles: Res<TileRegistry>, mut sg: ResMut<TerrainSpriteGrid>) {
@@ -325,37 +370,124 @@ fn handle_stairs_input(
     mut level: ResMut<CurrentLevel>,
     mut messages: ResMut<MessageLog>,
     mut commands: Commands,
-    monster_query: Query<Entity, With<MonsterTag>>,
+    monster_query: Query<(Entity, &MonsterName, &Health, &Position, &ArmorClass, &Evasion, &HitDice, &Speed, &MeleeAttack), With<MonsterTag>>,
+    item_query: Query<(Entity, &ItemName, &ItemData, &ItemPosition), With<ItemTag>>,
     terrain_sprites: Query<Entity, With<TerrainSpriteMarker>>,
     mut grid: ResMut<MonsterGrid>,
     mut sprite_grid: ResMut<TerrainSpriteGrid>,
+    mut store: ResMut<LevelStore>,
+    mut next_mode: ResMut<NextState<GameMode>>,
     tiles: Res<TileRegistry>,
+    defs: Res<MonsterDefs>,
 ) {
-    if !keyboard.just_pressed(KeyCode::Period) || !keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+    // Shift+> = descend, Shift+< = ascend
+    let going_down = keyboard.just_pressed(KeyCode::Period) && keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    let going_up = keyboard.just_pressed(KeyCode::Comma) && keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    if !going_down && !going_up { return }
+
+    let on_feature = terrain.get(player.pos);
+    if going_down && on_feature != Some(Feature::StairsDown) {
+        messages.add("There are no stairs down here.");
         return;
     }
-    if terrain.get(player.pos) != Some(Feature::StairsDown) {
-        messages.add("There are no stairs here.");
+    if going_up && on_feature != Some(Feature::StairsUp) {
+        if level.depth == 1 {
+            if player.has_orb {
+                messages.add("You escape with the Orb of Zot! You win!");
+                next_mode.set(GameMode::Won);
+                return;
+            } else {
+                messages.add("You cannot leave without the Orb.");
+                return;
+            }
+        }
+        messages.add("There are no stairs up here.");
         return;
     }
 
-    // Despawn old level
-    for entity in monster_query.iter() { commands.entity(entity).despawn(); }
+    // Save current level
+    let saved_monsters: Vec<SavedMonster> = monster_query.iter().map(|(_, name, hp, pos, ac, ev, hd, spd, atk)| {
+        SavedMonster {
+            name: name.0.clone(), pos: pos.0, hp: hp.current, max_hp: hp.max,
+            ac: ac.0, ev: ev.0, hd: hd.0, speed: spd.base,
+            attack_type: atk.attack_type.clone(), attack_damage: atk.damage,
+        }
+    }).collect();
+    let saved_items: Vec<SavedItem> = item_query.iter().map(|(_, name, data, pos)| {
+        SavedItem {
+            name: name.0.clone(), pos: pos.0, class: data.0.class,
+            plus: data.0.plus, quantity: data.0.quantity, glyph: data.0.glyph,
+        }
+    }).collect();
+    store.levels.insert(level.depth, SavedLevel {
+        grid: terrain.clone(), monsters: saved_monsters, items: saved_items, player_pos: player.pos,
+    });
+
+    // Despawn everything
+    for (entity, _, _, _, _, _, _, _, _) in monster_query.iter() { commands.entity(entity).despawn(); }
+    for (entity, _, _, _) in item_query.iter() { commands.entity(entity).despawn(); }
     for entity in terrain_sprites.iter() { commands.entity(entity).despawn(); }
     *grid = MonsterGrid::default();
     *sprite_grid = TerrainSpriteGrid::default();
 
-    level.depth += 1;
-    messages.add(format!("You descend to {}:{}.", level.branch, level.depth));
+    // Change depth
+    let new_depth = if going_down { level.depth + 1 } else { level.depth - 1 };
+    level.depth = new_depth;
 
-    // Generate new level from a vault
-    let des_path = "crawl-ref/source/dat/des/arrival/simple.des";
-    let new_grid = match load_des_vault(des_path, (level.depth as usize) % 20) {
-        Ok((g, pos, name)) => { messages.add(format!("Level: {}", name)); player.pos = pos; g }
-        Err(_) => { player.pos = Coord::new(5, 5); terrain::hardcoded_dungeon() }
+    if going_down {
+        messages.add(format!("You descend to D:{}.", new_depth));
+    } else {
+        messages.add(format!("You ascend to D:{}.", new_depth));
+    }
+
+    // Load or generate level
+    let new_grid = if let Some(saved) = store.levels.get(&new_depth) {
+        // Restore saved level
+        player.pos = saved.player_pos;
+        for sm in &saved.monsters {
+            let tile_id = dcss_tiles::monster_name_to_tile(&sm.name).unwrap_or(TileId::MonGoblin);
+            let w = sm.pos.to_world();
+            let entity = commands.spawn((
+                MonsterTag, MonsterName(sm.name.clone()),
+                Health { current: sm.hp, max: sm.max_hp },
+                Position(sm.pos), Speed { base: sm.speed, energy: 0 },
+                MeleeAttack { attack_type: sm.attack_type.clone(), damage: sm.attack_damage },
+                ArmorClass(sm.ac), Evasion(sm.ev), HitDice(sm.hd),
+                Sprite::from_image(tiles.get(tile_id)),
+                Transform::from_xyz(w.x, w.y, 1.0),
+            )).id();
+            grid.set(sm.pos, Some(entity));
+        }
+        for si in &saved.items {
+            commands.spawn((ItemTag, ItemName(si.name.clone()),
+                ItemData(item::ItemDef { name: si.name.clone(), class: si.class, plus: si.plus, quantity: si.quantity, glyph: si.glyph }),
+                ItemPosition(si.pos)));
+        }
+        saved.grid.clone()
+    } else {
+        // Generate new level
+        let des_path = "crawl-ref/source/dat/des/arrival/simple.des";
+        let mut new_grid = match load_des_vault(des_path, (new_depth as usize) % 20) {
+            Ok((g, pos, name)) => { messages.add(format!("Level: {}", name)); player.pos = pos; g }
+            Err(_) => { player.pos = Coord::new(5, 5); terrain::hardcoded_dungeon() }
+        };
+        terrain::ensure_stairs(&mut new_grid, new_depth, MAX_DEPTH);
+
+        // Spawn monsters for new level
+        spawn_monsters_for_level(&mut commands, &defs, &tiles, &new_grid, &player, &mut grid, new_depth);
+
+        // Spawn floor items
+        spawn_items_for_level(&mut commands, &new_grid, &player, &grid, new_depth);
+
+        // On D:5, spawn the Orb
+        if new_depth == MAX_DEPTH {
+            spawn_orb(&mut commands, &new_grid, &player, &grid, &tiles);
+        }
+
+        new_grid
     };
 
-    // Spawn new terrain sprites
+    // Spawn terrain sprites
     for y in 0..MAP_HEIGHT { for x in 0..MAP_WIDTH {
         let pos = Coord::new(x as i32, y as i32);
         let e = commands.spawn((TerrainSpriteMarker, GridPos(pos),
@@ -366,6 +498,81 @@ fn handle_stairs_input(
     commands.insert_resource(new_grid);
     player.turn_is_over = true;
     player.time_taken = 10;
+}
+
+fn spawn_monsters_for_level(commands: &mut Commands, defs: &MonsterDefs, tiles: &TileRegistry,
+    terrain: &TerrainGrid, player: &Player, grid: &mut MonsterGrid, depth: i32) {
+    let mut rng = rand::rng();
+    let mut floor_tiles = Vec::new();
+    for y in 0..MAP_HEIGHT { for x in 0..MAP_WIDTH {
+        let p = Coord::new(x as i32, y as i32);
+        if terrain.cells[y][x] == Feature::Floor && grid.get(p).is_none() && p != player.pos {
+            floor_tiles.push(p);
+        }
+    }}
+    let names = ["goblin", "rat", "kobold", "gnoll", "orc", "jackal", "bat"];
+    let count = (3 + depth * 2).min(floor_tiles.len() as i32) as usize;
+    for i in 0..count {
+        if floor_tiles.is_empty() { break }
+        let idx = rng.random_range(0..floor_tiles.len());
+        let pos = floor_tiles.swap_remove(idx);
+        let name = names[i % names.len()];
+        let Some(def) = defs.0.get(name) else { continue };
+        let Some(tid) = dcss_tiles::monster_name_to_tile(name) else { continue };
+        let hp = def.hp_10x / 10;
+        let atk = def.attacks.first().map(|a| MeleeAttack { attack_type: a.attack_type.clone(), damage: a.damage })
+            .unwrap_or(MeleeAttack { attack_type: "hit".into(), damage: 1 });
+        let w = pos.to_world();
+        let e = commands.spawn((MonsterTag, MonsterName(def.name.clone()),
+            Health { current: hp, max: hp }, Position(pos),
+            Speed { base: def.speed.unwrap_or(10), energy: 0 },
+            atk, ArmorClass(def.ac), Evasion(def.ev), HitDice(def.hd),
+            Sprite::from_image(tiles.get(tid)), Transform::from_xyz(w.x, w.y, 1.0))).id();
+        grid.set(pos, Some(e));
+    }
+}
+
+fn spawn_items_for_level(commands: &mut Commands, terrain: &TerrainGrid, player: &Player,
+    grid: &MonsterGrid, depth: i32) {
+    let mut rng = rand::rng();
+    let mut floor_tiles = Vec::new();
+    for y in 0..MAP_HEIGHT { for x in 0..MAP_WIDTH {
+        let p = Coord::new(x as i32, y as i32);
+        if terrain.cells[y][x] == Feature::Floor && grid.get(p).is_none() && p != player.pos {
+            floor_tiles.push(p);
+        }
+    }}
+    let count = rng.random_range(2..=5).min(floor_tiles.len());
+    for _ in 0..count {
+        if floor_tiles.is_empty() { break }
+        let idx = rng.random_range(0..floor_tiles.len());
+        let pos = floor_tiles.swap_remove(idx);
+        let def = item::random_item(depth);
+        commands.spawn((ItemTag, ItemName(def.name.clone()), ItemData(def), ItemPosition(pos)));
+    }
+}
+
+fn spawn_orb(commands: &mut Commands, terrain: &TerrainGrid, player: &Player,
+    grid: &MonsterGrid, tiles: &TileRegistry) {
+    let mut rng = rand::rng();
+    let mut floor_tiles = Vec::new();
+    for y in 0..MAP_HEIGHT { for x in 0..MAP_WIDTH {
+        let p = Coord::new(x as i32, y as i32);
+        if terrain.cells[y][x] == Feature::Floor && grid.get(p).is_none() && p != player.pos {
+            floor_tiles.push(p);
+        }
+    }}
+    if let Some(&pos) = floor_tiles.first() {
+        let orb = item::ItemDef {
+            name: "the Orb of Zot".into(),
+            class: item::ItemClass::Orb,
+            plus: 0, quantity: 1, glyph: '0',
+        };
+        let w = pos.to_world();
+        commands.spawn((ItemTag, ItemName(orb.name.clone()), ItemData(orb), ItemPosition(pos),
+            Sprite::from_image(tiles.get(TileId::OrbOfZot)),
+            Transform::from_xyz(w.x, w.y, 0.5)));
+    }
 }
 
 fn execute_player_action(mut pending: ResMut<PendingMove>, mut player: ResMut<Player>,
@@ -379,7 +586,7 @@ fn execute_player_action(mut pending: ResMut<PendingMove>, mut player: ResMut<Pl
     if !target.in_bounds() { return }
     if let Some(entity) = mg.get(target) {
         if let Ok((name, mut hp, ac, ev)) = monsters.get_mut(entity) {
-            let result = combat::resolve_melee(5 + player.str_stat / 3, 10 + player.xl * 2, ac.0, ev.0);
+            let result = combat::resolve_melee(player.weapon_damage(), player.accuracy(), ac.0, ev.0);
             if result.hit && result.damage > 0 { hp.current -= result.damage; messages.add(format!("You hit the {}! ({} damage)", name.0, result.damage)); }
             else if result.hit { messages.add(format!("You hit the {} but do no damage.", name.0)); }
             else { messages.add(format!("You miss the {}.", name.0)); }
@@ -394,19 +601,42 @@ fn execute_player_action(mut pending: ResMut<PendingMove>, mut player: ResMut<Pl
         // Auto-pickup items at new position
         for (entity, name, data, ipos) in items.iter() {
             if ipos.0 == target {
-                messages.add(format!("You pick up {}.", name.0));
-                inventory.add(data.0.clone());
+                if data.0.class == item::ItemClass::Orb {
+                    player.has_orb = true;
+                    messages.add("You pick up the Orb of Zot! Now ascend to the surface!");
+                } else {
+                    messages.add(format!("You pick up {}.", name.0));
+                    inventory.add(data.0.clone());
+                    player.gold = inventory.gold;
+                }
                 commands.entity(entity).despawn();
-                player.gold = inventory.gold;
             }
         }
     }
 }
 
-fn check_monster_death(mut commands: Commands, q: Query<(Entity, &MonsterName, &Health, &Position), With<MonsterTag>>,
-    mut grid: ResMut<MonsterGrid>, mut messages: ResMut<MessageLog>) {
-    for (entity, name, health, pos) in &q {
-        if health.current <= 0 { messages.add(format!("The {} dies!", name.0)); grid.set(pos.0, None); commands.entity(entity).despawn(); }
+fn check_monster_death(mut commands: Commands,
+    q: Query<(Entity, &MonsterName, &Health, &HitDice, &Position), With<MonsterTag>>,
+    mut grid: ResMut<MonsterGrid>, mut messages: ResMut<MessageLog>, mut player: ResMut<Player>) {
+    for (entity, name, health, hd, pos) in &q {
+        if health.current <= 0 {
+            let xp_gain = hd.0 * 10;
+            messages.add(format!("The {} dies! (+{} XP)", name.0, xp_gain));
+            grid.set(pos.0, None);
+            commands.entity(entity).despawn();
+            player.xp += xp_gain;
+            // Level up check
+            while player.xp >= player.xp_next {
+                player.xl += 1;
+                player.xp -= player.xp_next;
+                player.xp_next = player.xl * 25;
+                player.max_hp += 3 + player.str_stat / 4;
+                player.hp = player.max_hp;
+                player.max_mp += 1;
+                player.mp = player.max_mp;
+                messages.add(format!("Welcome to experience level {}!", player.xl));
+            }
+        }
     }
 }
 

@@ -12,7 +12,7 @@ widgets:
     track_hover: true
 ---
 
-# Create Your Character {title}
+# Create Your Character ::title
 
 ## Species
 [select](chosen_species){species_list}

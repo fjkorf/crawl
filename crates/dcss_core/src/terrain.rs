@@ -8,15 +8,20 @@ pub enum Feature {
     ClosedDoor,
     OpenDoor,
     StairsDown,
+    StairsUp,
 }
 
 impl Feature {
     pub fn is_passable(self) -> bool {
-        matches!(self, Feature::Floor | Feature::OpenDoor | Feature::StairsDown)
+        matches!(self, Feature::Floor | Feature::OpenDoor | Feature::StairsDown | Feature::StairsUp)
+    }
+
+    pub fn is_stairs(self) -> bool {
+        matches!(self, Feature::StairsDown | Feature::StairsUp)
     }
 }
 
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct TerrainGrid {
     pub cells: [[Feature; MAP_WIDTH]; MAP_HEIGHT],
 }
@@ -78,6 +83,7 @@ pub fn glyph_to_feature(ch: char) -> Feature {
         '.' | '{' | '}' | '(' | ')' | '[' | ']' | '@' => Feature::Floor,
         '+' => Feature::ClosedDoor,
         '>' => Feature::StairsDown,
+        '<' => Feature::StairsUp,
         ' ' => Feature::Wall, // space = rock/wall
         // Water, lava, etc. — treat as floor for now
         'w' | 'W' | 'l' => Feature::Floor,
@@ -123,6 +129,41 @@ pub fn from_map_lines(lines: &[String]) -> (TerrainGrid, Coord) {
     }
 
     (TerrainGrid { cells }, player_pos)
+}
+
+/// Ensure the terrain has required stairs. Places missing stairs on random floor tiles.
+pub fn ensure_stairs(grid: &mut TerrainGrid, depth: i32, max_depth: i32) {
+    use rand::Rng;
+    let mut rng = rand::rng();
+
+    let mut floor_tiles: Vec<Coord> = Vec::new();
+    let mut has_down = false;
+    let mut has_up = false;
+
+    for y in 0..MAP_HEIGHT {
+        for x in 0..MAP_WIDTH {
+            match grid.cells[y][x] {
+                Feature::StairsDown => has_down = true,
+                Feature::StairsUp => has_up = true,
+                Feature::Floor => floor_tiles.push(Coord::new(x as i32, y as i32)),
+                _ => {}
+            }
+        }
+    }
+
+    // D:1 needs no up-stairs (surface exit handled separately)
+    // Last level needs no down-stairs (orb level)
+    if !has_down && depth < max_depth && !floor_tiles.is_empty() {
+        let idx = rng.random_range(0..floor_tiles.len());
+        let pos = floor_tiles.swap_remove(idx);
+        grid.cells[pos.y as usize][pos.x as usize] = Feature::StairsDown;
+    }
+
+    if !has_up && depth > 1 && !floor_tiles.is_empty() {
+        let idx = rng.random_range(0..floor_tiles.len());
+        let pos = floor_tiles[idx];
+        grid.cells[pos.y as usize][pos.x as usize] = Feature::StairsUp;
+    }
 }
 
 /// Create a hardcoded multi-room dungeon for the MVP.

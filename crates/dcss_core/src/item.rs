@@ -10,6 +10,7 @@ pub enum ItemClass {
     Potion,
     Scroll,
     Gold,
+    Orb,
 }
 
 #[derive(Debug, Clone)]

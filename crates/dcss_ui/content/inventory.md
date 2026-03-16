@@ -6,13 +6,13 @@ page:
 
 # Inventory
 
-**Gold:** [display](gold_amount) {gold}
+**Gold:** [display](gold_amount) ::gold
 
-[foreach](items)
+::: foreach items
 
 | {letter} | {name} | {qty} |
 |----------|--------|-------|
 
-[/foreach]()
+:::
 
 *Press i or Escape to close.*

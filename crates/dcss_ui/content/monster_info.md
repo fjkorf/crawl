@@ -4,7 +4,7 @@ page:
   label: Monster Info
 ---
 
-# [display](monster_name) {title}
+# [display](monster_name) ::title
 
 | Stat | Value |
 |------|-------|
