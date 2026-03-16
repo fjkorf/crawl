@@ -506,7 +506,7 @@ epilogue {{
 }
 
 /// Recursively list all files under a directory.
-fn walkdir(dir: &str) -> Vec<String> {
+pub fn walkdir(dir: &str) -> Vec<String> {
     let mut files = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
