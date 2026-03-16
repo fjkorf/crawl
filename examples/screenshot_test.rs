@@ -75,6 +75,13 @@ fn main() {
         });
     }
 
+    // Skip character creation for automated tests
+    {
+        use dcss_core::chargen::ChargenState;
+        use dcss_core::turn::GamePhase;
+        app.insert_resource(ChargenState { species_index: 0, job_index: 0, confirmed: true });
+    }
+
     app.init_resource::<FrameCount>()
     .add_systems(Update, tick_frame);
 

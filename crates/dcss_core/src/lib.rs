@@ -6,6 +6,8 @@ pub mod combat;
 pub mod message;
 pub mod turn;
 pub mod level;
+pub mod chargen;
+pub mod item;
 
 #[cfg(test)]
 mod tests;

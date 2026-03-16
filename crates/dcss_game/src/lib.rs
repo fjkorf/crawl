@@ -5,18 +5,20 @@ use bevy::prelude::*;
 use bevy_egui::EguiPrimaryContextPass;
 use rand::Rng;
 
+use dcss_core::chargen::{self, ChargenState, SpeciesDefs, JobDefs};
 use dcss_core::combat;
+use dcss_core::item::{self, Inventory, ItemTag, ItemName, ItemData, ItemPosition};
 use dcss_core::level::{CurrentLevel, StairsAction, StairsDirection};
 use dcss_core::message::MessageLog;
 use dcss_core::monster::*;
 use dcss_core::player::{Player, PlayerSprite};
 use dcss_core::terrain::{self, Feature, TerrainGrid, TerrainSpriteGrid};
-use dcss_core::turn::{GameMode, PendingMove};
+use dcss_core::turn::{GameMode, GamePhase, PendingMove};
 use dcss_core::types::*;
 use dcss_lua::des_parser;
 use dcss_lua::lua_state;
 use dcss_tiles::{self, TileId, TileRegistry, TILE_SIZE};
-use dcss_ui::{examine, message_panel, stat_panel};
+use dcss_ui::{chargen_screen, examine, inventory_screen, message_panel, stat_panel};
 
 /// Controls where the dungeon comes from.
 #[derive(Resource, Default)]
@@ -30,7 +32,8 @@ pub struct DcssGamePlugin;
 
 impl Plugin for DcssGamePlugin {
     fn build(&self, app: &mut App) {
-        app.init_state::<GameMode>()
+        app.init_state::<GamePhase>()
+            .init_state::<GameMode>()
             .insert_resource(ClearColor(Color::srgb(0.1, 0.0, 0.2)))
             .init_resource::<DungeonSource>()
             .init_resource::<Player>()
@@ -43,26 +46,118 @@ impl Plugin for DcssGamePlugin {
             .init_resource::<examine::MonsterInfoState>()
             .init_resource::<CurrentLevel>()
             .init_resource::<StairsAction>()
-            .add_systems(Startup, (dcss_tiles::load_tiles, setup_camera))
-            .add_systems(Startup,
-                (load_monster_defs, generate_dungeon, spawn_dungeon, spawn_player, spawn_monsters, spawn_examine_cursor, welcome_message)
-                    .chain().after(dcss_tiles::load_tiles))
-            .add_systems(Update, player_input.run_if(in_state(GameMode::Play)))
+            .init_resource::<SpeciesDefs>()
+            .init_resource::<JobDefs>()
+            .init_resource::<ChargenState>()
+            .init_resource::<Inventory>()
+            // Startup: load data + camera (always needed)
+            .add_systems(Startup, (dcss_tiles::load_tiles, setup_camera, load_chargen_data_system, load_monster_defs))
+            // Character creation phase
+            .add_systems(EguiPrimaryContextPass,
+                chargen_screen::chargen_screen_system.run_if(in_state(GamePhase::CharacterCreation)))
+            .add_systems(Update, check_chargen_complete.run_if(in_state(GamePhase::CharacterCreation)))
+            // Playing phase: setup when entering
+            .add_systems(OnEnter(GamePhase::Playing),
+                (generate_dungeon, spawn_dungeon, spawn_player, spawn_monsters, spawn_floor_items, spawn_examine_cursor, welcome_message)
+                    .chain())
+            // Playing phase: gameplay
+            .add_systems(Update, player_input.run_if(in_state(GameMode::Play)).run_if(in_state(GamePhase::Playing)))
             .add_systems(Update,
                 (execute_player_action, handle_stairs_input, check_monster_death, monster_ai, check_player_death)
-                    .chain().run_if(in_state(GameMode::Play)).after(player_input))
+                    .chain().run_if(in_state(GameMode::Play)).run_if(in_state(GamePhase::Playing)).after(player_input))
             .add_systems(Update,
                 (sync_player_sprite, sync_monster_sprites, camera_follow)
-                    .run_if(in_state(GameMode::Play)).after(execute_player_action))
+                    .run_if(in_state(GamePhase::Playing)).after(execute_player_action))
             .add_systems(Update,
-                (enter_examine_mode, examine::hide_examine_cursor).run_if(in_state(GameMode::Play)))
+                (enter_examine_mode, toggle_inventory, examine::hide_examine_cursor)
+                    .run_if(in_state(GameMode::Play)).run_if(in_state(GamePhase::Playing)))
             .add_systems(Update,
                 (examine::examine_input_system, examine::examine_cursor_sync)
                     .chain().run_if(in_state(GameMode::Examine)))
+            .add_systems(Update, close_inventory.run_if(in_state(GameMode::Inventory)))
+            // egui panels (during playing)
             .add_systems(EguiPrimaryContextPass,
-                (stat_panel::stat_panel_system, message_panel::message_panel_system, examine::examine_popup_system).chain());
+                (stat_panel::stat_panel_system, message_panel::message_panel_system,
+                 examine::examine_popup_system)
+                    .chain().run_if(in_state(GamePhase::Playing)))
+            .add_systems(EguiPrimaryContextPass,
+                inventory_screen::inventory_screen_system.run_if(in_state(GameMode::Inventory)));
     }
 }
+
+// --- Character Creation ---
+
+fn load_chargen_data_system(mut species: ResMut<SpeciesDefs>, mut jobs: ResMut<JobDefs>) {
+    chargen::load_chargen_data(&mut species, &mut jobs);
+}
+
+fn check_chargen_complete(
+    mut chargen: ResMut<ChargenState>,
+    species: Res<SpeciesDefs>,
+    jobs: Res<JobDefs>,
+    mut player: ResMut<Player>,
+    mut messages: ResMut<MessageLog>,
+    mut next_phase: ResMut<NextState<GamePhase>>,
+) {
+    if !chargen.confirmed { return }
+    chargen.confirmed = false;
+
+    if let (Some(sp), Some(job)) = (species.0.get(chargen.species_index), jobs.0.get(chargen.job_index)) {
+        player.str_stat = sp.str_stat();
+        player.int_stat = sp.int_stat();
+        player.dex_stat = sp.dex_stat();
+        player.hp = 15 + sp.str_stat();
+        player.max_hp = player.hp;
+        player.mp = 3 + sp.int_stat() / 2;
+        player.max_mp = player.mp;
+        messages.add(format!("You are a {} {}.", sp.name, job.name));
+    }
+    next_phase.set(GamePhase::Playing);
+}
+
+// --- Inventory ---
+
+fn toggle_inventory(keyboard: Res<ButtonInput<KeyCode>>, mut next_state: ResMut<NextState<GameMode>>) {
+    if keyboard.just_pressed(KeyCode::KeyI) {
+        next_state.set(GameMode::Inventory);
+    }
+}
+
+fn close_inventory(keyboard: Res<ButtonInput<KeyCode>>, mut next_state: ResMut<NextState<GameMode>>) {
+    if keyboard.just_pressed(KeyCode::KeyI) || keyboard.just_pressed(KeyCode::Escape) {
+        next_state.set(GameMode::Play);
+    }
+}
+
+// --- Floor Items ---
+
+fn spawn_floor_items(
+    mut commands: Commands,
+    terrain: Res<TerrainGrid>,
+    player: Res<Player>,
+    level: Res<CurrentLevel>,
+    grid: Res<MonsterGrid>,
+) {
+    let mut rng = rand::rng();
+    let mut floor_tiles: Vec<Coord> = Vec::new();
+    for y in 0..MAP_HEIGHT { for x in 0..MAP_WIDTH {
+        let p = Coord::new(x as i32, y as i32);
+        if terrain.cells[y][x] == Feature::Floor && grid.get(p).is_none() && p != player.pos {
+            floor_tiles.push(p);
+        }
+    }}
+
+    let count = rng.random_range(3..=6).min(floor_tiles.len());
+    for _ in 0..count {
+        if floor_tiles.is_empty() { break }
+        let idx = rng.random_range(0..floor_tiles.len());
+        let pos = floor_tiles.swap_remove(idx);
+        let item_def = item::random_item(level.depth);
+        commands.spawn((ItemTag, ItemName(item_def.name.clone()), ItemData(item_def), ItemPosition(pos)));
+    }
+}
+
+// --- Examine Mode ---
 
 fn enter_examine_mode(keyboard: Res<ButtonInput<KeyCode>>, player: Res<Player>,
     mut cursor: ResMut<examine::ExamineCursor>, mut next_state: ResMut<NextState<GameMode>>, mut messages: ResMut<MessageLog>) {
@@ -217,7 +312,9 @@ fn handle_stairs_input(
 fn execute_player_action(mut pending: ResMut<PendingMove>, mut player: ResMut<Player>,
     mut terrain: ResMut<TerrainGrid>, mg: Res<MonsterGrid>, sg: Res<TerrainSpriteGrid>,
     tiles: Res<TileRegistry>, mut monsters: Query<(&MonsterName, &mut Health, &ArmorClass, &Evasion)>,
-    mut sprites: Query<&mut Sprite, With<TerrainSpriteMarker>>, mut messages: ResMut<MessageLog>) {
+    mut sprites: Query<&mut Sprite, With<TerrainSpriteMarker>>, mut messages: ResMut<MessageLog>,
+    mut commands: Commands, items: Query<(Entity, &ItemName, &ItemData, &ItemPosition), With<ItemTag>>,
+    mut inventory: ResMut<Inventory>) {
     let Some((dx, dy)) = pending.command.take() else { return };
     let target = Coord::new(player.pos.x + dx, player.pos.y + dy);
     if !target.in_bounds() { return }
@@ -235,6 +332,15 @@ fn execute_player_action(mut pending: ResMut<PendingMove>, mut player: ResMut<Pl
         messages.add("You open the door."); player.turn_is_over = true; player.time_taken = 10;
     } else if terrain.is_passable(target) {
         player.pos = target; player.turn_is_over = true; player.time_taken = 10;
+        // Auto-pickup items at new position
+        for (entity, name, data, ipos) in items.iter() {
+            if ipos.0 == target {
+                messages.add(format!("You pick up {}.", name.0));
+                inventory.add(data.0.clone());
+                commands.entity(entity).despawn();
+                player.gold = inventory.gold;
+            }
+        }
     }
 }
 

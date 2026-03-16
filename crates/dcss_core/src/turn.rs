@@ -1,10 +1,20 @@
 use bevy::prelude::*;
 
+/// Top-level game phase: character creation → playing.
+#[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum GamePhase {
+    #[default]
+    CharacterCreation,
+    Playing,
+}
+
+/// In-game mode during the Playing phase.
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum GameMode {
     #[default]
     Play,
     Examine,
+    Inventory,
     GameOver,
 }
 
