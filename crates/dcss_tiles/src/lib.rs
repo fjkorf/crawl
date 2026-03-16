@@ -13,6 +13,7 @@ pub enum TileId {
     StairsUp,
     PlayerHuman,
     OrbOfZot,
+    // Monsters
     MonGoblin,
     MonKobold,
     MonGnoll,
@@ -20,6 +21,23 @@ pub enum TileId {
     MonRat,
     MonBat,
     MonJackal,
+    MonAdder,
+    MonHobgoblin,
+    MonOgre,
+    MonScorpion,
+    MonTroll,
+    MonYak,
+    // Items
+    ItemDagger,
+    ItemSword,
+    ItemAxe,
+    ItemMace,
+    ItemSpear,
+    ItemLeather,
+    ItemChainMail,
+    ItemPotion,
+    ItemScroll,
+    ItemGold,
 }
 
 #[derive(Resource, Default)]
@@ -46,7 +64,29 @@ pub fn monster_name_to_tile(name: &str) -> Option<TileId> {
         "rat" => Some(TileId::MonRat),
         "bat" => Some(TileId::MonBat),
         "jackal" => Some(TileId::MonJackal),
-        _ => None,
+        "adder" => Some(TileId::MonAdder),
+        "hobgoblin" => Some(TileId::MonHobgoblin),
+        "ogre" => Some(TileId::MonOgre),
+        "scorpion" => Some(TileId::MonScorpion),
+        "troll" => Some(TileId::MonTroll),
+        "yak" => Some(TileId::MonYak),
+        _ => Some(TileId::MonGoblin), // fallback
+    }
+}
+
+/// Map an item subtype to a TileId.
+pub fn item_subtype_to_tile(subtype: &str, class: &str) -> TileId {
+    match (class, subtype) {
+        ("weapon", "dagger") => TileId::ItemDagger,
+        ("weapon", "short_sword") | ("weapon", "long_sword") | ("weapon", "broad_sword") => TileId::ItemSword,
+        ("weapon", "hand_axe") | ("weapon", "war_axe") | ("weapon", "battle_axe") => TileId::ItemAxe,
+        ("weapon", "mace") => TileId::ItemMace,
+        ("weapon", "spear") => TileId::ItemSpear,
+        ("armour", _) => TileId::ItemLeather,
+        ("potion", _) => TileId::ItemPotion,
+        ("scroll", _) => TileId::ItemScroll,
+        ("gold", _) => TileId::ItemGold,
+        _ => TileId::ItemGold,
     }
 }
 
@@ -66,6 +106,23 @@ const TILE_PATHS: &[(TileId, &str)] = &[
     (TileId::MonRat, "rltiles/mon/animals/rat.png"),
     (TileId::MonBat, "rltiles/mon/animals/bat.png"),
     (TileId::MonJackal, "rltiles/mon/animals/jackal.png"),
+    (TileId::MonAdder, "rltiles/mon/animals/adder.png"),
+    (TileId::MonHobgoblin, "rltiles/mon/humanoids/hobgoblin.png"),
+    (TileId::MonOgre, "rltiles/mon/humanoids/ogre.png"),
+    (TileId::MonScorpion, "rltiles/mon/animals/scorpion.png"),
+    (TileId::MonTroll, "rltiles/mon/humanoids/troll.png"),
+    (TileId::MonYak, "rltiles/mon/animals/yak.png"),
+    // Items
+    (TileId::ItemDagger, "rltiles/item/weapon/dagger.png"),
+    (TileId::ItemSword, "rltiles/item/weapon/short_sword1.png"),
+    (TileId::ItemAxe, "rltiles/item/weapon/hand_axe1.png"),
+    (TileId::ItemMace, "rltiles/item/weapon/mace1.png"),
+    (TileId::ItemSpear, "rltiles/item/weapon/spear1.png"),
+    (TileId::ItemLeather, "rltiles/item/armour/leather_armour1.png"),
+    (TileId::ItemChainMail, "rltiles/item/armour/chain_mail1.png"),
+    (TileId::ItemPotion, "rltiles/item/potion/ruby.png"),
+    (TileId::ItemScroll, "rltiles/item/scroll/i-teleportation.png"),
+    (TileId::ItemGold, "rltiles/item/gold/01.png"),
 ];
 
 pub fn load_tiles(mut commands: Commands, asset_server: Res<AssetServer>) {

@@ -140,6 +140,13 @@ fn render_stat_panel_system(mut contexts: EguiContexts, mut state: ResMut<LituiS
     state.stat_xl = format!("{}", player.xl);
     state.stat_xp = format!("{}/{}", player.xp, player.xp_next);
     state.stat_gold = format!("{}", player.gold);
+    state.stat_weapon = player.weapon_name();
+    state.stat_armour = player.armour_name();
+    let mut status_parts = Vec::new();
+    if player.status.poison > 0 { status_parts.push(format!("Poison({})", player.status.poison)); }
+    if player.status.might > 0 { status_parts.push(format!("Might({})", player.status.might)); }
+    if player.status.haste > 0 { status_parts.push(format!("Haste({})", player.status.haste)); }
+    state.stat_status = if status_parts.is_empty() { String::new() } else { status_parts.join(" ") };
     state.has_orb = player.has_orb;
 
     egui::SidePanel::right("stats").resizable(false).exact_width(180.0)
@@ -232,17 +239,57 @@ fn handle_item_use(
     if keyboard.just_pressed(KeyCode::KeyQ) {
         if let Some(idx) = inventory.items.iter().position(|i| i.class == item::ItemClass::Potion) {
             let potion = inventory.items.remove(idx);
-            if potion.name.contains("healing") {
-                let healed = (player.max_hp - player.hp).min(10 + player.xl);
-                player.hp += healed;
-                messages.add(format!("You drink the {}. You feel better. (+{} HP)", potion.name, healed));
-            } else {
-                messages.add(format!("You drink the {}.", potion.name));
+            match potion.subtype.as_str() {
+                "healing" => {
+                    let healed = (player.max_hp - player.hp).min(10 + player.xl * 2);
+                    player.hp += healed;
+                    messages.add(format!("You drink the {}. (+{} HP)", potion.name, healed));
+                }
+                "might" => {
+                    player.status.might = 20;
+                    messages.add(format!("You drink the {}. You feel mighty!", potion.name));
+                }
+                "haste" => {
+                    player.status.haste = 15;
+                    messages.add(format!("You drink the {}. You feel fast!", potion.name));
+                }
+                _ => messages.add(format!("You drink the {}.", potion.name)),
             }
             player.turn_is_over = true;
             player.time_taken = 10;
         } else {
             messages.add("You have no potions.");
+        }
+    }
+
+    // r = read first scroll
+    if keyboard.just_pressed(KeyCode::KeyR) {
+        if let Some(idx) = inventory.items.iter().position(|i| i.class == item::ItemClass::Scroll) {
+            let scroll = inventory.items.remove(idx);
+            match scroll.subtype.as_str() {
+                "teleportation" => {
+                    // Teleport to random floor tile (handled in dcss_game by setting a flag)
+                    messages.add("You read the scroll of teleportation. You are teleported!");
+                    // Find random floor tile
+                    // (simplified: just move player randomly — proper implementation needs terrain access)
+                    let mut rng = rand::rng();
+                    let dx = rng.random_range(-5..=5);
+                    let dy = rng.random_range(-5..=5);
+                    player.pos = Coord::new(player.pos.x + dx, player.pos.y + dy);
+                }
+                "blinking" => {
+                    messages.add("You read the scroll of blinking. You blink!");
+                    let mut rng = rand::rng();
+                    let dx = rng.random_range(-3..=3);
+                    let dy = rng.random_range(-3..=3);
+                    player.pos = Coord::new(player.pos.x + dx, player.pos.y + dy);
+                }
+                _ => messages.add(format!("You read the {}.", scroll.name)),
+            }
+            player.turn_is_over = true;
+            player.time_taken = 10;
+        } else {
+            messages.add("You have no scrolls.");
         }
     }
 
@@ -287,24 +334,9 @@ fn spawn_floor_items(
     player: Res<Player>,
     level: Res<CurrentLevel>,
     grid: Res<MonsterGrid>,
+    tiles: Res<TileRegistry>,
 ) {
-    let mut rng = rand::rng();
-    let mut floor_tiles: Vec<Coord> = Vec::new();
-    for y in 0..MAP_HEIGHT { for x in 0..MAP_WIDTH {
-        let p = Coord::new(x as i32, y as i32);
-        if terrain.cells[y][x] == Feature::Floor && grid.get(p).is_none() && p != player.pos {
-            floor_tiles.push(p);
-        }
-    }}
-
-    let count = rng.random_range(3..=6).min(floor_tiles.len());
-    for _ in 0..count {
-        if floor_tiles.is_empty() { break }
-        let idx = rng.random_range(0..floor_tiles.len());
-        let pos = floor_tiles.swap_remove(idx);
-        let item_def = item::random_item(level.depth);
-        commands.spawn((ItemTag, ItemName(item_def.name.clone()), ItemData(item_def), ItemPosition(pos)));
-    }
+    spawn_items_for_level(&mut commands, &terrain, &player, &grid, level.depth, &tiles);
 }
 
 // --- Examine Mode ---
@@ -360,7 +392,7 @@ fn welcome_message(mut messages: ResMut<MessageLog>) {
     messages.add("Welcome to the dungeon!");
     messages.add("Move: arrow keys or hjkl. Attack: walk into monsters.");
     messages.add("Stairs: Shift+> down, Shift+< up. Examine: x. Inventory: i.");
-    messages.add("Quaff potion: q. Wield weapon: w. Wear armour: Shift+W.");
+    messages.add("Quaff potion: q. Read scroll: r. Wield weapon: w. Wear armour: Shift+W.");
     messages.add("Find the Orb of Zot on D:5 and return to the surface!");
 }
 
@@ -547,7 +579,7 @@ fn handle_stairs_input(
         }
         for si in &saved.items {
             commands.spawn((ItemTag, ItemName(si.name.clone()),
-                ItemData(item::ItemDef { name: si.name.clone(), class: si.class, plus: si.plus, quantity: si.quantity, glyph: si.glyph }),
+                ItemData(item::ItemDef { name: si.name.clone(), class: si.class, plus: si.plus, quantity: si.quantity, glyph: si.glyph, ..Default::default() }),
                 ItemPosition(si.pos)));
         }
         saved.grid.clone()
@@ -564,7 +596,7 @@ fn handle_stairs_input(
         spawn_monsters_for_level(&mut commands, &defs, &tiles, &new_grid, &player, &mut grid, new_depth);
 
         // Spawn floor items
-        spawn_items_for_level(&mut commands, &new_grid, &player, &grid, new_depth);
+        spawn_items_for_level(&mut commands, &new_grid, &player, &grid, new_depth, &tiles);
 
         // On D:5, spawn the Orb
         if new_depth == MAX_DEPTH {
@@ -597,8 +629,8 @@ fn spawn_monsters_for_level(commands: &mut Commands, defs: &MonsterDefs, tiles: 
             floor_tiles.push(p);
         }
     }}
-    let names = ["goblin", "rat", "kobold", "gnoll", "orc", "jackal", "bat"];
-    let count = (3 + depth * 2).min(floor_tiles.len() as i32) as usize;
+    let names = monsters_for_depth(depth);
+    let count = (5 + depth * 2).min(floor_tiles.len() as i32) as usize;
     for i in 0..count {
         if floor_tiles.is_empty() { break }
         let idx = rng.random_range(0..floor_tiles.len());
@@ -620,7 +652,7 @@ fn spawn_monsters_for_level(commands: &mut Commands, defs: &MonsterDefs, tiles: 
 }
 
 fn spawn_items_for_level(commands: &mut Commands, terrain: &TerrainGrid, player: &Player,
-    grid: &MonsterGrid, depth: i32) {
+    grid: &MonsterGrid, depth: i32, tiles: &TileRegistry) {
     let mut rng = rand::rng();
     let mut floor_tiles = Vec::new();
     for y in 0..MAP_HEIGHT { for x in 0..MAP_WIDTH {
@@ -629,13 +661,25 @@ fn spawn_items_for_level(commands: &mut Commands, terrain: &TerrainGrid, player:
             floor_tiles.push(p);
         }
     }}
-    let count = rng.random_range(2..=5).min(floor_tiles.len());
+    let count = rng.random_range(3..=6 + depth as usize).min(floor_tiles.len());
     for _ in 0..count {
         if floor_tiles.is_empty() { break }
         let idx = rng.random_range(0..floor_tiles.len());
         let pos = floor_tiles.swap_remove(idx);
         let def = item::random_item(depth);
-        commands.spawn((ItemTag, ItemName(def.name.clone()), ItemData(def), ItemPosition(pos)));
+        let class_str = match def.class {
+            item::ItemClass::Weapon => "weapon",
+            item::ItemClass::Armour => "armour",
+            item::ItemClass::Potion => "potion",
+            item::ItemClass::Scroll => "scroll",
+            item::ItemClass::Gold => "gold",
+            _ => "gold",
+        };
+        let tile_id = dcss_tiles::item_subtype_to_tile(&def.subtype, class_str);
+        let w = pos.to_world();
+        commands.spawn((ItemTag, ItemName(def.name.clone()), ItemData(def), ItemPosition(pos),
+            Sprite::from_image(tiles.get(tile_id)),
+            Transform::from_xyz(w.x, w.y, 0.5)));
     }
 }
 
@@ -653,7 +697,8 @@ fn spawn_orb(commands: &mut Commands, terrain: &TerrainGrid, player: &Player,
         let orb = item::ItemDef {
             name: "the Orb of Zot".into(),
             class: item::ItemClass::Orb,
-            plus: 0, quantity: 1, glyph: '0',
+            glyph: '0', subtype: "orb".into(),
+            ..Default::default()
         };
         let w = pos.to_world();
         commands.spawn((ItemTag, ItemName(orb.name.clone()), ItemData(orb), ItemPosition(pos),
@@ -673,9 +718,26 @@ fn execute_player_action(mut pending: ResMut<PendingMove>, mut player: ResMut<Pl
     if !target.in_bounds() { return }
     if let Some(entity) = mg.get(target) {
         if let Ok((name, mut hp, ac, ev)) = monsters.get_mut(entity) {
-            let result = combat::resolve_melee(player.weapon_damage(), player.accuracy(), ac.0, ev.0);
-            if result.hit && result.damage > 0 { hp.current -= result.damage; messages.add(format!("You hit the {}! ({} damage)", name.0, result.damage)); }
-            else if result.hit { messages.add(format!("You hit the {} but do no damage.", name.0)); }
+            let brand = player.weapon_brand();
+            let result = combat::resolve_melee(player.weapon_damage(), player.accuracy(), ac.0, ev.0, brand);
+            if result.hit && result.total_damage > 0 {
+                hp.current -= result.total_damage;
+                let brand_msg = if result.brand_damage > 0 {
+                    format!(" + {} {}", result.brand_damage, result.brand.map(|b| b.name()).unwrap_or(""))
+                } else { String::new() };
+                messages.add(format!("You hit the {} with your {}! ({}{} = {} damage)",
+                    name.0, player.weapon_name(), result.damage, brand_msg, result.total_damage));
+                // Draining heals attacker
+                if result.brand == Some(item::Brand::Draining) {
+                    let heal = (result.total_damage / 4).max(1);
+                    player.hp = (player.hp + heal).min(player.max_hp);
+                    messages.add(format!("You drain the {}! (+{} HP)", name.0, heal));
+                }
+                // Venom poisons (for player status - simplify to just extra message)
+                if result.brand == Some(item::Brand::Venom) {
+                    messages.add(format!("The {} is poisoned!", name.0));
+                }
+            } else if result.hit { messages.add(format!("You hit the {} but do no damage.", name.0)); }
             else { messages.add(format!("You miss the {}.", name.0)); }
             player.turn_is_over = true; player.time_taken = 10;
         }
@@ -759,8 +821,8 @@ fn monster_ai(mut player: ResMut<Player>,
 
     // Apply attacks
     for (name, dmg, _atype, hd) in &attacks {
-        let result = combat::resolve_melee(*dmg, hd * 3 + 5, player.ac, player.ev);
-        if result.hit && result.damage > 0 { player.hp -= result.damage; messages.add(format!("The {} hits you! ({} damage)", name, result.damage)); }
+        let result = combat::resolve_melee(*dmg, hd * 3 + 5, player.total_ac(), player.ev, None);
+        if result.hit && result.total_damage > 0 { player.hp -= result.total_damage; messages.add(format!("The {} hits you! ({} damage)", name, result.total_damage)); }
         else if result.hit { messages.add(format!("The {} hits you but does no damage.", name)); }
         else { messages.add(format!("The {} misses you.", name)); }
     }
@@ -774,6 +836,12 @@ fn monster_ai(mut player: ResMut<Player>,
         }
     }
 
+    // Tick status effects and regen
+    let status_msgs = player.tick_status();
+    for msg in status_msgs {
+        messages.add(msg);
+    }
+
     player.turn_is_over = false;
 }
 
@@ -783,10 +851,25 @@ fn check_player_death(player: Res<Player>, mut messages: ResMut<MessageLog>, mut
 
 fn load_monster_defs(mut defs: ResMut<MonsterDefs>) {
     let base = "crawl-ref/source/dat/mons";
-    for name in ["goblin", "kobold", "rat", "bat", "jackal", "gnoll", "orc"] {
+    let names = [
+        "goblin", "kobold", "rat", "bat", "jackal", "gnoll", "orc",
+        "adder", "hobgoblin", "ogre", "scorpion", "troll", "yak",
+    ];
+    for name in names {
         if let Ok(c) = std::fs::read_to_string(format!("{}/{}.yaml", base, name)) {
             if let Ok(def) = serde_yaml::from_str::<MonsterDef>(&c) { defs.0.insert(name.into(), def); }
         }
+    }
+}
+
+/// Monsters appropriate for each depth.
+fn monsters_for_depth(depth: i32) -> &'static [&'static str] {
+    match depth {
+        1 => &["rat", "bat", "goblin", "kobold"],
+        2 => &["jackal", "gnoll", "adder", "hobgoblin", "kobold"],
+        3 => &["orc", "ogre", "scorpion", "gnoll"],
+        4 => &["orc", "troll", "yak", "ogre"],
+        _ => &["troll", "ogre", "yak", "orc"],
     }
 }
 

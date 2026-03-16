@@ -82,7 +82,7 @@ fn from_map_lines_basic() {
 fn combat_always_produces_valid_results() {
     // Run many combats to verify no panics and reasonable ranges
     for _ in 0..1000 {
-        let result = combat::resolve_melee(10, 15, 5, 10);
+        let result = combat::resolve_melee(10, 15, 5, 10, None);
         assert!(result.damage >= 0);
         if result.hit {
             assert!(result.damage <= 10); // can't exceed base damage
@@ -95,7 +95,7 @@ fn combat_always_produces_valid_results() {
 #[test]
 fn combat_zero_damage_weapon() {
     for _ in 0..100 {
-        let result = combat::resolve_melee(0, 10, 0, 0);
+        let result = combat::resolve_melee(0, 10, 0, 0, None);
         assert_eq!(result.damage, 0);
     }
 }

@@ -33,6 +33,10 @@ widgets:
 | **XL** | [display](stat_xl) |
 | **XP** | [display](stat_xp) |
 | **Gold** | [display](stat_gold) |
+| **Wpn** | [display](stat_weapon) |
+| **Arm** | [display](stat_armour) |
+
+[display](stat_status)
 
 ::: if has_orb
 **ORB OF ZOT** ::gold
