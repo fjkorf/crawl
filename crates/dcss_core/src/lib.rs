@@ -8,6 +8,7 @@ pub mod turn;
 pub mod level;
 pub mod chargen;
 pub mod item;
+pub mod enums;
 
 #[cfg(test)]
 mod tests;

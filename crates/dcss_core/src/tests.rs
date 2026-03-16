@@ -1,6 +1,7 @@
 //! Unit tests for core game logic.
 
 use crate::combat;
+use crate::enums::{DungeonFeatureType, MonsterType};
 use crate::terrain::{self, Feature, TerrainGrid, from_map_lines, glyph_to_feature};
 use crate::types::*;
 
@@ -114,4 +115,42 @@ fn hardcoded_dungeon_has_rooms() {
     assert_eq!(grid.get(Coord::new(30, 14)), Some(Feature::StairsDown));
     // Outer wall
     assert_eq!(grid.get(Coord::new(0, 0)), Some(Feature::Wall));
+}
+
+// --- Enum tests ---
+
+#[test]
+fn dungeon_feature_properties() {
+    assert!(DungeonFeatureType::RockWall.is_wall());
+    assert!(DungeonFeatureType::Tree.is_wall());
+    assert!(!DungeonFeatureType::Floor.is_wall());
+
+    assert!(DungeonFeatureType::Floor.is_passable());
+    assert!(DungeonFeatureType::OpenDoor.is_passable());
+    assert!(DungeonFeatureType::ShallowWater.is_passable());
+    assert!(!DungeonFeatureType::Lava.is_passable());
+    assert!(!DungeonFeatureType::DeepWater.is_passable());
+    assert!(!DungeonFeatureType::ClosedDoor.is_passable());
+
+    assert!(DungeonFeatureType::ClosedDoor.is_door());
+    assert!(DungeonFeatureType::OpenDoor.is_door());
+    assert!(!DungeonFeatureType::Floor.is_door());
+
+    assert!(DungeonFeatureType::StoneStairsDownI.is_stairs_down());
+    assert!(DungeonFeatureType::EscapeHatchDown.is_stairs_down());
+    assert!(!DungeonFeatureType::StoneStairsUpI.is_stairs_down());
+}
+
+#[test]
+fn monster_type_from_name() {
+    assert_eq!(MonsterType::from_name("goblin"), Some(MonsterType::Goblin));
+    assert_eq!(MonsterType::from_name("orc wizard"), Some(MonsterType::OrcWizard));
+    assert_eq!(MonsterType::from_name("rat"), Some(MonsterType::Rat));
+    assert_eq!(MonsterType::from_name("unknown_monster"), None);
+}
+
+#[test]
+fn dungeon_feature_fits_in_u8() {
+    // The C++ has COMPILE_CHECK(NUM_FEATURES <= 256)
+    assert!(std::mem::size_of::<DungeonFeatureType>() <= 1);
 }
