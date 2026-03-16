@@ -1,228 +1,200 @@
-//! Screenshot test binary: renders the dungeon scene for N frames, captures a screenshot, and exits.
+//! Screenshot test: renders the dungeon scene, optionally walks through all rooms,
+//! captures screenshots, and exits.
+//!
+//! Modes (set via SCREENSHOT_MODE env var):
+//!   static      — single screenshot at spawn position (default)
+//!   walkthrough — scripted walk visiting all 4 rooms, 4 screenshots
 //!
 //! Usage:
 //!   cargo run --example screenshot_test
-//!   SCREENSHOT_OUTPUT=path/to/output.png cargo run --example screenshot_test
+//!   SCREENSHOT_MODE=walkthrough cargo run --example screenshot_test
+
+#[path = "../src/plugin.rs"]
+mod plugin;
+
+use std::collections::VecDeque;
 
 use bevy::app::AppExit;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
-use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
+use bevy_egui::EguiPlugin;
 
-use dcss_core::message::MessageLog;
-use dcss_core::monster::*;
-use dcss_core::player::{Player, PlayerSprite};
-use dcss_core::terrain::{self, Feature, TerrainGrid};
 use dcss_core::turn::PendingMove;
-use dcss_core::types::*;
-use dcss_tiles::{self, TileId, TileRegistry, TILE_SIZE};
-use dcss_ui::{message_panel, stat_panel};
+use plugin::DcssGamePlugin;
+
+// --- Separate, focused resources ---
+
+#[derive(Resource, Default)]
+struct FrameCount(u32);
 
 #[derive(Resource)]
-struct FrameCounter {
-    count: u32,
-    screenshot_taken: bool,
-    output_path: String,
+struct WalkthroughQueue(VecDeque<WalkthroughStep>);
+
+#[derive(Clone)]
+enum WalkthroughStep {
+    Move(i32, i32),
+    WaitFrames(u32),
+    Screenshot(String),
 }
+
+#[derive(Resource)]
+struct StaticScreenshotPath(String);
+
+/// Counts down wait frames. Inserted/removed dynamically.
+#[derive(Resource)]
+struct WaitTimer(u32);
 
 fn main() {
-    let output_path = std::env::var("SCREENSHOT_OUTPUT")
-        .unwrap_or_else(|_| "tests/snapshots/dungeon_scene.new.png".to_string());
+    let mode = std::env::var("SCREENSHOT_MODE").unwrap_or_else(|_| "static".into());
+    let output_dir = std::env::var("SCREENSHOT_DIR").unwrap_or_else(|_| "tests/snapshots".into());
 
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "DCSS Screenshot Test".into(),
-                resolution: bevy::window::WindowResolution::new(1280, 960),
-                ..default()
-            }),
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "DCSS Screenshot Test".into(),
+            resolution: bevy::window::WindowResolution::new(1280, 960),
             ..default()
-        }))
-        .add_plugins(EguiPlugin::default())
-        .insert_resource(ClearColor(Color::srgb(0.1, 0.0, 0.2)))
-        .insert_resource(terrain::hardcoded_dungeon())
-        .init_resource::<Player>()
-        .init_resource::<MonsterGrid>()
-        .init_resource::<MonsterDefs>()
-        .init_resource::<MessageLog>()
-        .init_resource::<PendingMove>()
-        .insert_resource(FrameCounter {
-            count: 0,
-            screenshot_taken: false,
-            output_path,
-        })
-        // Startup
-        .add_systems(Startup, (dcss_tiles::load_tiles, setup_camera))
-        .add_systems(
-            Startup,
-            (load_monster_defs, spawn_dungeon, spawn_player, spawn_monsters, setup_messages)
-                .chain()
-                .after(dcss_tiles::load_tiles),
-        )
-        // Screenshot control
-        .add_systems(Update, screenshot_controller)
-        // Render sync
-        .add_systems(Update, (sync_player_sprite, camera_follow))
-        // egui panels
-        .add_systems(
-            EguiPrimaryContextPass,
-            (stat_panel::stat_panel_system, message_panel::message_panel_system).chain(),
-        )
-        .run();
-}
-
-fn setup_camera(mut commands: Commands) {
-    commands.spawn((
-        Camera2d,
-        Projection::from(OrthographicProjection {
-            scale: 0.5,
-            ..OrthographicProjection::default_2d()
         }),
-    ));
-}
+        ..default()
+    }))
+    .add_plugins(EguiPlugin::default())
+    .add_plugins(DcssGamePlugin)
+    .init_resource::<FrameCount>()
+    .add_systems(Update, tick_frame);
 
-fn setup_messages(mut messages: ResMut<MessageLog>) {
-    messages.add("Welcome to the dungeon! Use arrow keys or hjkl to move.");
-    messages.add("Walk into monsters to attack them.");
-    messages.add("The goblin hisses at you.");
-}
-
-fn screenshot_controller(
-    mut commands: Commands,
-    mut counter: ResMut<FrameCounter>,
-    mut exit: MessageWriter<AppExit>,
-) {
-    counter.count += 1;
-
-    // Wait enough frames for assets to load and scene to render
-    if counter.count == 15 && !counter.screenshot_taken {
-        let path = counter.output_path.clone();
-        commands
-            .spawn(Screenshot::primary_window())
-            .observe(save_to_disk(path));
-        counter.screenshot_taken = true;
+    match mode.as_str() {
+        "walkthrough" => {
+            app.insert_resource(WalkthroughQueue(build_walkthrough(&output_dir)));
+            // Must run before the plugin's player_input system which also writes PendingMove
+            app.add_systems(First, walkthrough_system);
+        }
+        _ => {
+            let path = std::env::var("SCREENSHOT_OUTPUT")
+                .unwrap_or_else(|_| format!("{}/dungeon_scene.new.png", output_dir));
+            app.insert_resource(StaticScreenshotPath(path));
+            app.add_systems(Update, static_screenshot_system.after(tick_frame));
+        }
     }
 
-    // Exit after screenshot has had time to save
-    if counter.count >= 25 {
+    app.run();
+}
+
+fn tick_frame(mut count: ResMut<FrameCount>) {
+    count.0 += 1;
+}
+
+// --- Static mode: wait for scene, take one screenshot, exit ---
+
+fn static_screenshot_system(
+    mut commands: Commands,
+    frame: Res<FrameCount>,
+    path: Res<StaticScreenshotPath>,
+    mut exit: MessageWriter<AppExit>,
+    mut taken: Local<bool>,
+) {
+    if frame.0 == 15 && !*taken {
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(path.0.clone()));
+        *taken = true;
+    }
+    if frame.0 >= 25 {
         exit.write(AppExit::Success);
     }
 }
 
-// --- Dungeon Rendering (duplicated from main.rs) ---
+// --- Walkthrough mode: process step queue one step per frame ---
 
-#[derive(Component)]
-struct TerrainSprite;
-
-fn spawn_dungeon(mut commands: Commands, terrain_grid: Res<TerrainGrid>, tiles: Res<TileRegistry>) {
-    for y in 0..MAP_HEIGHT {
-        for x in 0..MAP_WIDTH {
-            let tile_id = match terrain_grid.cells[y][x] {
-                Feature::Wall => TileId::WallBrickDark,
-                Feature::Floor => TileId::FloorGreyDirt,
-                Feature::ClosedDoor => TileId::DoorClosed,
-                Feature::OpenDoor => TileId::DoorOpen,
-                Feature::StairsDown => TileId::StairsDown,
-            };
-            commands.spawn((
-                TerrainSprite,
-                Sprite::from_image(tiles.get(tile_id)),
-                Transform::from_xyz(x as f32 * TILE_SIZE, -(y as f32) * TILE_SIZE, 0.0),
-            ));
-        }
-    }
-}
-
-fn spawn_player(mut commands: Commands, player: Res<Player>, tiles: Res<TileRegistry>) {
-    let world = player.pos.to_world();
-    commands.spawn((
-        PlayerSprite,
-        Sprite::from_image(tiles.get(TileId::PlayerHuman)),
-        Transform::from_xyz(world.x, world.y, 1.0),
-    ));
-}
-
-fn sync_player_sprite(player: Res<Player>, mut query: Query<&mut Transform, With<PlayerSprite>>) {
-    for mut transform in &mut query {
-        let world = player.pos.to_world();
-        transform.translation.x = world.x;
-        transform.translation.y = world.y;
-    }
-}
-
-fn camera_follow(
-    player: Res<Player>,
-    mut camera: Query<&mut Transform, (With<Camera2d>, Without<PlayerSprite>)>,
-) {
-    for mut transform in &mut camera {
-        let target = player.pos.to_world();
-        transform.translation.x = target.x;
-        transform.translation.y = target.y;
-    }
-}
-
-fn load_monster_defs(mut defs: ResMut<MonsterDefs>) {
-    let base_path = "crawl-ref/source/dat/mons";
-    let names = ["goblin", "kobold", "rat", "bat", "jackal", "gnoll", "orc"];
-    for name in &names {
-        let path = format!("{}/{}.yaml", base_path, name);
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(def) = serde_yaml::from_str::<MonsterDef>(&content) {
-                defs.0.insert(name.to_string(), def);
-            }
-        }
-    }
-}
-
-fn spawn_monsters(
+fn walkthrough_system(
     mut commands: Commands,
-    defs: Res<MonsterDefs>,
-    tiles: Res<TileRegistry>,
-    mut grid: ResMut<MonsterGrid>,
+    mut queue: ResMut<WalkthroughQueue>,
+    mut pending: ResMut<PendingMove>,
+    mut exit: MessageWriter<AppExit>,
+    mut wait: Local<u32>,
 ) {
-    let placements = [
-        ("goblin", Coord::new(8, 4)),
-        ("rat", Coord::new(25, 4)),
-        ("kobold", Coord::new(30, 6)),
-        ("gnoll", Coord::new(5, 15)),
-        ("orc", Coord::new(10, 14)),
-        ("jackal", Coord::new(25, 14)),
-        ("bat", Coord::new(33, 15)),
-    ];
-
-    for (name, pos) in &placements {
-        let Some(def) = defs.0.get(*name) else { continue };
-        let Some(tile_id) = dcss_tiles::monster_name_to_tile(name) else { continue };
-
-        let hp = def.hp_10x / 10;
-        let attack = def
-            .attacks
-            .first()
-            .map(|a| MeleeAttack {
-                attack_type: a.attack_type.clone(),
-                damage: a.damage,
-            })
-            .unwrap_or(MeleeAttack {
-                attack_type: "hit".to_string(),
-                damage: 1,
-            });
-
-        let world = pos.to_world();
-        let entity = commands
-            .spawn((
-                MonsterTag,
-                MonsterName(def.name.clone()),
-                Health { current: hp, max: hp },
-                Position(*pos),
-                Speed { base: def.speed.unwrap_or(10), energy: 0 },
-                attack,
-                ArmorClass(def.ac),
-                Evasion(def.ev),
-                HitDice(def.hd),
-                Sprite::from_image(tiles.get(tile_id)),
-                Transform::from_xyz(world.x, world.y, 1.0),
-            ))
-            .id();
-        grid.set(*pos, Some(entity));
+    // If waiting, count down
+    if *wait > 0 {
+        *wait -= 1;
+        return;
     }
+
+    let Some(step) = queue.0.pop_front() else {
+        // Queue exhausted — wait a few frames for last screenshot to save, then exit
+        *wait = 10;
+        // Insert a sentinel so we don't keep re-entering this branch
+        queue.0.push_back(WalkthroughStep::WaitFrames(0));
+        exit.write(AppExit::Success);
+        return;
+    };
+
+    match step {
+        WalkthroughStep::Move(dx, dy) => {
+            pending.command = Some((dx, dy));
+        }
+        WalkthroughStep::WaitFrames(n) => {
+            *wait = n;
+        }
+        WalkthroughStep::Screenshot(path) => {
+            commands
+                .spawn(Screenshot::primary_window())
+                .observe(save_to_disk(path));
+        }
+    }
+}
+
+// --- Walkthrough path definition ---
+
+fn build_walkthrough(output_dir: &str) -> VecDeque<WalkthroughStep> {
+    use WalkthroughStep::*;
+    let mut s = VecDeque::new();
+
+    // Wait for scene to load and render
+    s.push_back(WaitFrames(20));
+
+    // Room 1 screenshot — player starts at (5,5), goblin at (8,4)
+    s.push_back(Screenshot(format!("{}/room1.png", output_dir)));
+    s.push_back(WaitFrames(5));
+
+    // Walk right from (5,5) toward door at (13,5): 7 steps to (12,5)
+    for _ in 0..7 {
+        s.push_back(Move(1, 0));
+    }
+    // Open door at (13,5)
+    s.push_back(Move(1, 0));
+    // Walk through corridor into Room 2: (14,5) to (25,5)
+    for _ in 0..11 {
+        s.push_back(Move(1, 0));
+    }
+    s.push_back(WaitFrames(3));
+
+    // Room 2 screenshot — player at ~(25,5), rat at (25,4), kobold at (30,6)
+    s.push_back(Screenshot(format!("{}/room2.png", output_dir)));
+    s.push_back(WaitFrames(5));
+
+    // Walk to corridor entrance: right to x=28, then down
+    for _ in 0..3 {
+        s.push_back(Move(1, 0));
+    }
+    // Down corridor y=5 to y=14: 9 steps
+    for _ in 0..9 {
+        s.push_back(Move(0, 1));
+    }
+    s.push_back(WaitFrames(3));
+
+    // Room 4 screenshot — player at ~(28,14), jackal at (25,14), bat at (33,15)
+    s.push_back(Screenshot(format!("{}/room4.png", output_dir)));
+    s.push_back(WaitFrames(5));
+
+    // Walk to Room 3 via corridor: down 1 to y=15, left to (8,15)
+    s.push_back(Move(0, 1));
+    for _ in 0..20 {
+        s.push_back(Move(-1, 0));
+    }
+    s.push_back(WaitFrames(3));
+
+    // Room 3 screenshot — player at ~(8,15), gnoll at (5,15), orc at (10,14)
+    s.push_back(Screenshot(format!("{}/room3.png", output_dir)));
+    s.push_back(WaitFrames(10));
+
+    s
 }

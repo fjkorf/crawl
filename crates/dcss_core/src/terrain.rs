@@ -30,8 +30,44 @@ impl TerrainGrid {
         }
     }
 
+    pub fn set(&mut self, pos: Coord, feature: Feature) {
+        if pos.in_bounds() {
+            self.cells[pos.y as usize][pos.x as usize] = feature;
+        }
+    }
+
     pub fn is_passable(&self, pos: Coord) -> bool {
         self.get(pos).is_some_and(|f| f.is_passable())
+    }
+}
+
+/// Grid mapping coordinates to terrain sprite entities (for swapping tile images).
+#[derive(Resource)]
+pub struct TerrainSpriteGrid {
+    pub cells: [[Option<Entity>; MAP_WIDTH]; MAP_HEIGHT],
+}
+
+impl Default for TerrainSpriteGrid {
+    fn default() -> Self {
+        Self {
+            cells: [[None; MAP_WIDTH]; MAP_HEIGHT],
+        }
+    }
+}
+
+impl TerrainSpriteGrid {
+    pub fn get(&self, pos: Coord) -> Option<Entity> {
+        if pos.in_bounds() {
+            self.cells[pos.y as usize][pos.x as usize]
+        } else {
+            None
+        }
+    }
+
+    pub fn set(&mut self, pos: Coord, entity: Option<Entity>) {
+        if pos.in_bounds() {
+            self.cells[pos.y as usize][pos.x as usize] = entity;
+        }
     }
 }
 

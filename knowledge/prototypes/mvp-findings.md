@@ -22,6 +22,25 @@ Bevy 0.18 provides `Screenshot::primary_window()` + `save_to_disk()` observer pa
 - Screenshot saves asynchronously — wait ~10 more frames before exiting
 - Comparison test runs the example as a subprocess, loads both PNGs with `image` crate, does per-pixel RGBA diff with channel threshold of 30 and max 2% pixel difference allowed
 
+## DcssPlugin Pattern
+
+Extracted all shared game setup into `src/plugin.rs::DcssGamePlugin`. Both `main.rs` (~20 lines) and `examples/screenshot_test.rs` (~170 lines) use it. This avoids ~200 lines of duplication and makes test examples trivial to write.
+
+Key design: the plugin owns all game systems but does NOT own the window/rendering plugins. The binary or example adds `DefaultPlugins` + `EguiPlugin` + `DcssGamePlugin`.
+
+## Walkthrough Screenshot Test
+
+Scripted movement through all 4 dungeon rooms, taking a screenshot at each stop. Uses:
+- `WalkthroughQueue` resource with `VecDeque<WalkthroughStep>` (Move/Wait/Screenshot)
+- System runs in `First` schedule to set `PendingMove` before the plugin's input system
+- `player_input` must NOT overwrite `PendingMove` when no key is pressed — changed to only write on actual input
+
+Produces 4 baseline PNGs (room1-room4) covering all 7 monsters + doors + stairs.
+
+## Door Interaction
+
+`TerrainGrid::set()` mutates the grid, `TerrainSpriteGrid` maps coords to sprite entities for swapping tile images. Opening a closed door updates both the data grid and the visual sprite in one system.
+
 ## Bevy 0.18 API Notes
 
 ### Breaking Changes from Common Examples
