@@ -413,9 +413,23 @@ fn feature_to_tile(f: Feature) -> TileId {
 fn spawn_dungeon(mut commands: Commands, grid: Res<TerrainGrid>, tiles: Res<TileRegistry>, mut sg: ResMut<TerrainSpriteGrid>) {
     for y in 0..MAP_HEIGHT { for x in 0..MAP_WIDTH {
         let pos = Coord::new(x as i32, y as i32);
+        let feature = grid.cells[y][x];
+        let wx = x as f32 * TILE_SIZE;
+        let wy = -(y as f32) * TILE_SIZE;
+
+        // Features with transparency (doors, stairs) need a floor tile underneath
+        let needs_floor = matches!(feature,
+            Feature::ClosedDoor | Feature::OpenDoor | Feature::StairsDown | Feature::StairsUp);
+
+        if needs_floor {
+            commands.spawn((Sprite::from_image(tiles.get(TileId::FloorGreyDirt)),
+                Transform::from_xyz(wx, wy, 0.0)));
+        }
+
+        let z = if needs_floor { 0.1 } else { 0.0 };
         let e = commands.spawn((TerrainSpriteMarker, GridPos(pos),
-            Sprite::from_image(tiles.get(feature_to_tile(grid.cells[y][x]))),
-            Transform::from_xyz(x as f32 * TILE_SIZE, -(y as f32) * TILE_SIZE, 0.0))).id();
+            Sprite::from_image(tiles.get(feature_to_tile(feature))),
+            Transform::from_xyz(wx, wy, z))).id();
         sg.set(pos, Some(e));
     }}
 }
@@ -606,12 +620,22 @@ fn handle_stairs_input(
         new_grid
     };
 
-    // Spawn terrain sprites
+    // Spawn terrain sprites (with floor underlay for transparent features)
     for y in 0..MAP_HEIGHT { for x in 0..MAP_WIDTH {
         let pos = Coord::new(x as i32, y as i32);
+        let feature = new_grid.cells[y][x];
+        let wx = x as f32 * TILE_SIZE;
+        let wy = -(y as f32) * TILE_SIZE;
+        let needs_floor = matches!(feature,
+            Feature::ClosedDoor | Feature::OpenDoor | Feature::StairsDown | Feature::StairsUp);
+        if needs_floor {
+            commands.spawn((Sprite::from_image(tiles.get(TileId::FloorGreyDirt)),
+                Transform::from_xyz(wx, wy, 0.0)));
+        }
+        let z = if needs_floor { 0.1 } else { 0.0 };
         let e = commands.spawn((TerrainSpriteMarker, GridPos(pos),
-            Sprite::from_image(tiles.get(feature_to_tile(new_grid.cells[y][x]))),
-            Transform::from_xyz(x as f32 * TILE_SIZE, -(y as f32) * TILE_SIZE, 0.0))).id();
+            Sprite::from_image(tiles.get(feature_to_tile(feature))),
+            Transform::from_xyz(wx, wy, z))).id();
         sprite_grid.set(pos, Some(e));
     }}
     commands.insert_resource(new_grid);
