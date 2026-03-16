@@ -9,3 +9,5 @@ dcss_core = { path = "../dcss_core" }
 bevy = { version = "0.18", default-features = false }
 bevy_egui = "0.39"
 egui = "0.33"
+litui = { path = "/Users/FrankKorf/Playspaces/egui-md-macro/crates/litui" }
+bevy_ecs = "0.18"

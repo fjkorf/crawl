@@ -10,8 +10,8 @@ page:
 | Stat | Value |
 |------|-------|
 | **HD** | [display](hd) |
-| **HP** {hp_label} | [display](hp) |
+| **HP** | [display](hp) |
 | **AC** | [display](ac) |
 | **EV** | [display](ev) |
 | **Speed** | [display](speed) |
-| **Attack** {attack_label} | [display](attack) |
+| **Attack** | [display](attack) |

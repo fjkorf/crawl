@@ -27,6 +27,7 @@ impl Plugin for DcssGamePlugin {
             .init_resource::<PendingMove>()
             .init_resource::<TerrainSpriteGrid>()
             .init_resource::<examine::ExamineCursor>()
+            .init_resource::<examine::MonsterInfoState>()
             // Startup
             .add_systems(Startup, (dcss_tiles::load_tiles, setup_camera))
             .add_systems(

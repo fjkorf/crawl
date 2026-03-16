@@ -1,8 +1,26 @@
 use bevy::prelude::*;
+use bevy_ecs::prelude::Resource;
 use bevy_egui::{EguiContexts, egui};
 
 use dcss_core::monster::*;
 use dcss_core::types::Coord;
+
+// --- litui-generated monster info page ---
+
+mod monster_page {
+    use egui;
+    use litui::*;
+
+    define_markdown_app! {
+        parent: "content/_app.md",
+        "content/monster_info.md",
+    }
+}
+
+pub use monster_page::AppState as MonsterInfoState;
+
+impl Resource for MonsterInfoState {}
+impl Resource for monster_page::Page {}
 
 // --- Examine cursor ---
 
@@ -75,7 +93,7 @@ pub fn examine_input_system(
     }
 }
 
-/// Render the monster info popup using egui directly.
+/// Render the monster info popup using litui-generated markdown.
 pub fn examine_popup_system(
     mut contexts: EguiContexts,
     cursor: Res<ExamineCursor>,
@@ -89,6 +107,7 @@ pub fn examine_popup_system(
         &Speed,
         &MeleeAttack,
     )>,
+    mut info_state: ResMut<MonsterInfoState>,
 ) -> Result {
     if !cursor.showing_popup {
         return Ok(());
@@ -102,45 +121,24 @@ pub fn examine_popup_system(
         return Ok(());
     };
 
+    // Populate litui AppState with monster data
+    info_state.monster_name = name.0.clone();
+    info_state.hd = format!("{}", hd.0);
+    info_state.hp = format!("{}/{}", hp.current, hp.max);
+    info_state.ac = format!("{}", ac.0);
+    info_state.ev = format!("{}", ev.0);
+    info_state.speed = format!("{}", speed.base);
+    info_state.attack = format!("{} ({})", attack.attack_type, attack.damage);
+
     egui::Window::new("Monster Info")
         .collapsible(false)
         .resizable(false)
-        .default_width(260.0)
+        .default_width(280.0)
         .show(contexts.ctx_mut()?, |ui| {
-            ui.colored_label(
-                egui::Color32::from_rgb(255, 170, 0),
-                egui::RichText::new(&name.0).size(22.0).strong(),
-            );
-            ui.separator();
-
-            egui::Grid::new("monster_stats")
-                .num_columns(2)
-                .spacing([20.0, 4.0])
-                .show(ui, |ui| {
-                    stat_row(ui, "HD", &format!("{}", hd.0));
-                    stat_row(
-                        ui,
-                        "HP",
-                        &format!("{}/{}", hp.current, hp.max),
-                    );
-                    stat_row(ui, "AC", &format!("{}", ac.0));
-                    stat_row(ui, "EV", &format!("{}", ev.0));
-                    stat_row(ui, "Speed", &format!("{}", speed.base));
-                    stat_row(
-                        ui,
-                        "Attack",
-                        &format!("{} ({})", attack.attack_type, attack.damage),
-                    );
-                });
+            monster_page::render_monster_info(ui, &mut info_state);
         });
 
     Ok(())
-}
-
-fn stat_row(ui: &mut egui::Ui, label: &str, value: &str) {
-    ui.label(egui::RichText::new(label).strong().color(egui::Color32::GRAY));
-    ui.label(value);
-    ui.end_row();
 }
 
 /// Sync the cursor highlight sprite position.

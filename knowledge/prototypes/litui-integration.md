@@ -7,28 +7,39 @@
 - Styles via YAML frontmatter are powerful for theming
 - The demo_content example was an excellent reference for project structure
 
-## What We Needed But Couldn't Use litui For
+## Option C Implemented — Display-Only Fields Work
 
-### Read-Only Display Popups
+litui implemented Option C from our proposal: `[display](field)` now self-declares its field as `String` on `AppState` when no other widget provides it. The monster info popup is now rendered entirely via litui markdown:
 
-Our examine mode shows a monster stat card: name, HD, HP, AC, EV, speed, attack. All fields are read-only strings populated from ECS component data each frame.
+```markdown
+# [display](monster_name) {title}
 
-litui's `[display](field)` widget reads from AppState, which is perfect — BUT it requires the field to be *declared* by an input widget (`[slider]`, `[textedit]`, `[checkbox]`, etc.) on some page. There is no way to declare a display-only String field.
-
-**Error we hit:**
+| Stat | Value |
+|------|-------|
+| **HD** | [display](hd) |
+| **HP** | [display](hp) |
 ```
-[display](monster_name) references unknown field 'monster_name' —
-no widget declares this field.
+
+The system populates `info_state.monster_name`, `.hd`, `.hp`, etc. from ECS components each frame, and litui renders them as a styled markdown table inside an `egui::Window`.
+
+## Integration Pattern
+
+```rust
+mod monster_page {
+    use litui::*;
+    define_markdown_app! {
+        parent: "content/_app.md",
+        "content/monster_info.md",
+    }
+}
+pub use monster_page::AppState as MonsterInfoState;
+impl Resource for MonsterInfoState {}
 ```
 
-**Workaround used:** Plain egui with `egui::Window` + `egui::Grid` + `stat_row()` helper. Works fine but loses litui's markdown authoring benefits.
-
-## Feature Request for litui
-
-See `knowledge/prototypes/litui-display-only-proposal.md` for a detailed proposal.
+Then in the system: populate `info_state` fields and call `monster_page::render_monster_info(ui, &mut info_state)`.
 
 ## When to Use litui in This Project
 
-- **Good fit**: Character dump, help screens, god descriptions, species/background selection — text-heavy semi-static pages where authors want to write content in markdown
-- **Not a fit (currently)**: Data-driven popups where all fields come from game state and no user input is involved
-- **Would become a fit**: If litui adds display-only field declarations (see proposal)
+- **Good fit**: Monster info popups, character dump, help screens, god descriptions, species/background selection
+- **Pattern**: Any screen where content is text-heavy and data is injected via `[display]` fields
+- **Not a fit**: The dungeon grid, minimap, real-time animated elements
