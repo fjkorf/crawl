@@ -15,6 +15,7 @@ pub enum GameMode {
     Play,
     Examine,
     Inventory,
+    Help,
     GameOver,
     Won,
 }

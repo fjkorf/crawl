@@ -22,7 +22,7 @@ use dcss_core::types::*;
 use dcss_lua::des_parser;
 use dcss_lua::lua_state;
 use dcss_tiles::{self, TileId, TileRegistry, TILE_SIZE};
-use dcss_ui::{examine, LituiState, render_chargen, render_inventory, render_stat_panel, render_message_log, render_death_screen};
+use dcss_ui::{examine, LituiState, render_chargen, render_inventory, render_stat_panel, render_message_log, render_death_screen, render_help_screen};
 
 /// Controls where the dungeon comes from.
 #[derive(Resource, Default)]
@@ -78,12 +78,15 @@ impl Plugin for DcssGamePlugin {
                 (update_fov, sync_player_sprite, sync_monster_sprites, apply_visibility, camera_follow)
                     .chain().run_if(in_state(GamePhase::Playing)).after(execute_player_action))
             .add_systems(Update,
-                (enter_examine_mode, toggle_inventory, handle_item_use, handle_save, examine::hide_examine_cursor)
+                (enter_examine_mode, toggle_inventory, toggle_help, handle_item_use, handle_save, examine::hide_examine_cursor)
                     .run_if(in_state(GameMode::Play)).run_if(in_state(GamePhase::Playing)))
             .add_systems(Update,
                 (examine::examine_input_system, examine::examine_cursor_sync)
                     .chain().run_if(in_state(GameMode::Examine)))
             .add_systems(Update, close_inventory.run_if(in_state(GameMode::Inventory)))
+            .add_systems(Update, close_help.run_if(in_state(GameMode::Help)))
+            .add_systems(EguiPrimaryContextPass,
+                render_help_screen_system.run_if(in_state(GameMode::Help)))
             .add_systems(Update, populate_inventory_state.run_if(in_state(GameMode::Inventory)))
             // egui panels (during playing)
             .add_systems(EguiPrimaryContextPass,
@@ -348,6 +351,27 @@ fn handle_save(
             Err(e) => messages.add(format!("Save failed: {}", e)),
         }
     }
+}
+
+fn toggle_help(keyboard: Res<ButtonInput<KeyCode>>, mut next_state: ResMut<NextState<GameMode>>) {
+    if keyboard.just_pressed(KeyCode::Slash) && keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+        next_state.set(GameMode::Help);
+    }
+}
+
+fn close_help(keyboard: Res<ButtonInput<KeyCode>>, mut next_state: ResMut<NextState<GameMode>>) {
+    if keyboard.just_pressed(KeyCode::Escape) || keyboard.just_pressed(KeyCode::Slash) {
+        next_state.set(GameMode::Play);
+    }
+}
+
+fn render_help_screen_system(mut contexts: EguiContexts) -> Result {
+    egui::CentralPanel::default().show(contexts.ctx_mut()?, |ui| {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            render_help_screen(ui);
+        });
+    });
+    Ok(())
 }
 
 fn close_inventory(keyboard: Res<ButtonInput<KeyCode>>, mut next_state: ResMut<NextState<GameMode>>) {
